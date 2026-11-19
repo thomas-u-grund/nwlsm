@@ -5,6 +5,11 @@
 * Design 2: the true weights are the latent-distance weights of the influence model (5 nearest actors, inverse distance), b2 = 1: the influence model must be
 *   about unbiased, the fixed-network model is biased and has a larger root mean square error.
 * REPS replications per design (default 20; env NWLSM_REPS).
+capture which nwspmatrix
+if _rc {
+	di "SKIP: test_nwlsm_infl_nam needs the core command nwspmatrix (nwcommands 3.28.0 or later)"
+	exit
+}
 do cscripts/nwlsm_testlib.do
 do cscripts/nwlsm_infl_sim.do
 local reps : env NWLSM_REPS

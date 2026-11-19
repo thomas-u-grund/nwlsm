@@ -4,7 +4,7 @@ capture program drop nwinstall
 local core : env NWCORE
 if "`core'" == "" local core "/Users/tgrund/FILES_NEW/SOFTWARE/nwcommands"
 local scratch : env NWLSM_SCRATCH
-if "`scratch'" == "" local scratch "/private/tmp/claude-501/-Users-tgrund-FILES-NEW-SOFTWARE-nwcommands/9d5243e9-ee49-4558-835d-02925b410730/scratchpad/nwlsm_work"
+if "`scratch'" == "" local scratch "`c(tmpdir)'/nwlsm_tests"
 local tag : env NWLSM_TAG
 tempfile __f
 local plus "`scratch'/plus_`tag'_`=floor(runiform()*1e9)'"
@@ -17,6 +17,8 @@ adopath ++ "`core'/lib"
 adopath ++ "`repo'"
 adopath ++ "`repo'/lib"
 adopath ++ "`repo'/lib/plugins/macos"
+adopath ++ "`repo'/lib/plugins/unix"
+adopath ++ "`repo'/lib/plugins/windows"
 global LSM_REPO "`repo'"
 global LSM_SCRATCH "`scratch'"
 
