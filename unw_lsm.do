@@ -25,6 +25,10 @@ capture mata: mata drop lsm_mds()
 capture mata: mata drop lsm_start()
 capture mata: mata drop lsm_priorvar()
 capture mata: mata drop lsm_mcse()
+capture mata: mata drop lsm_rhat()
+capture mata: mata drop lsm_perms()
+capture mata: mata drop lsm_relabel()
+capture mata: mata drop lsm_procR()
 capture mata: mata drop lsm_procrustes()
 capture mata: mata drop lsm_ymat()
 capture mata: mata drop lsm_node_covs()
@@ -80,7 +84,7 @@ real scalar LsmNativeAvailable()
 	return(fileexists(p))
 }
 
-real scalar LSM_PROTOCOL_NEEDED() return(2)
+real scalar LSM_PROTOCOL_NEEDED() return(3)
 
 class LsmNat {
 	real scalar isopen, L
@@ -137,14 +141,14 @@ void LsmNat::close()
 // pvar, b0: 1 x K, Z0: n x d, flags: (sender, receiver, sociality, bilinear), eprior: 3 x 3 (scale, df, start variance of the effects),
 // E0: n x 3 start values of the effects
 void LsmNat::setup(real matrix y, real scalar directed, real matrix X, real scalar d, real rowvector prior,
-		real rowvector pvar, real rowvector b0, real matrix Z0, real rowvector flags, real matrix eprior, real matrix E0)
+		real rowvector pvar, real rowvector b0, real matrix Z0, real rowvector flags, real matrix eprior, real matrix E0, real rowvector cl)
 {
 	real scalar n, nc, k
 	real colvector blob
 
 	n = rows(y)
 	nc = rows(X) / n
-	blob = (LSM_PROTOCOL_NEEDED() \ n \ directed \ nc \ d \ (flags[1] + 2 * flags[2] + 4 * flags[3]) \ flags[4] \ J(9, 1, 0)) \ prior' \ pvar' \ b0' \ vec(Z0') \ vec(eprior') \ vec(E0) \ vec(editmissing(y, -1)')
+	blob = (LSM_PROTOCOL_NEEDED() \ n \ directed \ nc \ d \ (flags[1] + 2 * flags[2] + 4 * flags[3]) \ flags[4] \ cl[1] \ cl[2] \ cl[3] \ cl[4] \ cl[5] \ J(4, 1, 0)) \ prior' \ pvar' \ b0' \ vec(Z0') \ vec(eprior') \ vec(E0) \ vec(editmissing(y, -1)')
 	if (nc > 0) {
 		for (k = 1; k <= nc; k++) blob = blob \ vec(editmissing(X[((k - 1) * n + 1)..(k * n), .], 0)')
 	}
@@ -274,13 +278,22 @@ real rowvector lsm_priorvar(real matrix X, real scalar n, real scalar dir, real 
 	return(pv)
 }
 
-// Monte Carlo standard error of the mean of each column (batch means, batches of about sqrt(S) draws)
-real rowvector lsm_mcse(real matrix x)
+// Monte Carlo standard error of the mean of each column (batch means, batches of about sqrt(S) draws). With C > 1 chains (stored one
+// after the other) the standard error of the pooled mean combines the standard errors of the chains.
+real rowvector lsm_mcse(real matrix x, | real scalar C)
 {
-	real scalar S, b, nb, k
+	real scalar S, b, nb, k, c, Sc
 	real matrix bm
+	real rowvector v
 
+	if (args() < 2) C = 1
 	S = rows(x)
+	if (C > 1) {
+		Sc = S / C
+		v = J(1, cols(x), 0)
+		for (c = 1; c <= C; c++) v = v + lsm_mcse(x[((c - 1) * Sc + 1)..(c * Sc), .], 1) :^ 2
+		return(sqrt(v) / C)
+	}
 	b = max((1, floor(sqrt(S))))
 	nb = floor(S / b)
 	if (nb < 2) return(sqrt(diagonal(variance(x))' / S))
@@ -289,16 +302,91 @@ real rowvector lsm_mcse(real matrix x)
 	return(sqrt(diagonal(variance(bm))' / nb))
 }
 
-// Procrustes (rotation and reflection, no scaling) of Z onto Ref, both centred; returns the aligned Z
-real matrix lsm_procrustes(real matrix Z, real matrix Ref)
+// Gelman-Rubin potential scale reduction factor of each column; the C chains are stored one after the other
+real rowvector lsm_rhat(real matrix x, real scalar C)
+{
+	real scalar Sc, c, k
+	real matrix cm, cv
+	real rowvector W, Bn, V
+
+	Sc = rows(x) / C
+	cm = J(C, cols(x), .)
+	cv = J(C, cols(x), .)
+	for (c = 1; c <= C; c++) {
+		cm[c, .] = mean(x[((c - 1) * Sc + 1)..(c * Sc), .])
+		cv[c, .] = diagonal(variance(x[((c - 1) * Sc + 1)..(c * Sc), .]))'
+	}
+	W = mean(cv)
+	Bn = diagonal(variance(cm))'
+	V = (Sc - 1) / Sc :* W + Bn
+	return(sqrt(V :/ (W :+ (W :== 0) * 1e-300)))
+}
+
+// Procrustes (rotation and reflection, no scaling) of Z onto Ref, both centred: the orthogonal matrix R that makes Z * R closest to Ref
+real matrix lsm_procR(real matrix Z, real matrix Ref)
 {
 	real matrix M, U, Vt
 	real rowvector s
 
 	M = cross(Z, Ref)
 	svd(M, U, s, Vt)
-	return(Z * (U * Vt))
+	return(U * Vt)
 }
+
+real matrix lsm_procrustes(real matrix Z, real matrix Ref)
+{
+	return(Z * lsm_procR(Z, Ref))
+}
+
+// all permutations of 1..G, one per row
+real matrix lsm_perms(real scalar G)
+{
+	real matrix P, Q
+	real scalar k
+
+	if (G == 1) return(1)
+	Q = lsm_perms(G - 1)
+	P = J(0, G, .)
+	for (k = 1; k <= G; k++) {
+		P = P \ ((k > 1 ? Q[., 1..(k - 1)] : J(rows(Q), 0, .)), J(rows(Q), 1, G), (k <= G - 1 ? Q[., k..(G - 1)] : J(rows(Q), 0, .)))
+	}
+	return(P)
+}
+
+// Label correction of the cluster memberships (rows: draws, columns: actors, labels 1..G). The labels of each draw are permuted to agree as
+// well as possible with a reference membership matrix, first the one-hot memberships of draw `start`, then (3 rounds) the posterior
+// membership probabilities found so far. PI[it, g] = the corrected label of the label g in draw it; Q = n x G posterior membership probabilities.
+void lsm_relabel(real matrix Kd, real scalar G, real scalar start, real matrix PI, real matrix Q)
+{
+	real scalar n, S, rep, it, a, best
+	real matrix perms, Qref, M, Qn
+	real colvector vM, sc
+	real rowvector kr
+
+	n = cols(Kd)
+	S = rows(Kd)
+	perms = lsm_perms(G)
+	Qref = ((Kd[start, .]' * J(1, G, 1)) :== (J(n, 1, 1) * (1..G))) :* 1
+	PI = J(S, G, .)
+	Q = Qref
+	for (rep = 1; rep <= 3; rep++) {
+		Qn = J(n, G, 0)
+		for (it = 1; it <= S; it++) {
+			M = ((Kd[it, .]' * J(1, G, 1)) :== (J(n, 1, 1) * (1..G)))' * Qref
+			vM = vec(M)
+			sc = J(rows(perms), 1, 0)
+			for (a = 1; a <= G; a++) sc = sc + vM[(perms[., a] :- 1) * G :+ a]
+			best = selectindex(sc :== max(sc))[1]
+			PI[it, .] = perms[best, .]
+			kr = PI[it, Kd[it, .]]
+			Qn = Qn + ((kr' * J(1, G, 1)) :== (J(n, 1, 1) * (1..G)))
+		}
+		Qref = Qn / S
+		Q = Qref
+	}
+}
+
+
 
 // n x n tie matrix of a network object's matrix: 0/1, missing stays missing, self-loops are ignored later
 real matrix lsm_ymat(real matrix a)
@@ -360,31 +448,43 @@ real scalar lsm_geweke(real colvector x)
 	return((mean(a) - mean(b)) / sqrt(va + vb))
 }
 
-// diagnostics of the columns of a draws matrix: (ESS, Geweke z, mean, sd) per column
-real matrix LsmDiag(real matrix x)
+// diagnostics of the columns of a draws matrix (C chains stored one after the other): (ESS, Geweke z, mean, sd, Gelman-Rubin R) per column.
+// ESS: sum over the chains; Geweke z: the value of the largest absolute size over the chains; R: missing for one chain.
+real matrix LsmDiag(real matrix x, | real scalar C)
 {
-	real scalar k
+	real scalar k, c, Sc, z
 	real matrix R
+	real colvector xc
 
-	R = J(cols(x), 4, .)
+	if (args() < 2) C = 1
+	Sc = rows(x) / C
+	R = J(cols(x), 5, .)
 	for (k = 1; k <= cols(x); k++) {
-		R[k, 1] = lsm_ess(x[., k])
-		R[k, 2] = lsm_geweke(x[., k])
+		R[k, 1] = 0
+		R[k, 2] = 0
+		for (c = 1; c <= C; c++) {
+			xc = x[((c - 1) * Sc + 1)..(c * Sc), k]
+			R[k, 1] = R[k, 1] + lsm_ess(xc)
+			z = lsm_geweke(xc)
+			if (abs(z) > abs(R[k, 2])) R[k, 2] = z
+		}
 		R[k, 3] = mean(x[., k])
 		R[k, 4] = sqrt(variance(x[., k]))
+		if (C > 1) R[k, 5] = lsm_rhat(x[., k], C)
 	}
 	return(R)
 }
 
 // summary of a variance parameter: mean, sd, mcse, 2.5%, 97.5%
-real rowvector lsm_vartable(real colvector v)
+real rowvector lsm_vartable(real colvector v, | real scalar C)
 {
 	real colvector srt
 	real scalar S
 
+	if (args() < 2) C = 1
 	S = rows(v)
 	srt = sort(v, 1)
-	return((mean(v), sqrt(variance(v)), lsm_mcse(v), srt[max((1, ceil(0.025 * S)))], srt[min((S, floor(0.975 * S) + 1))]))
+	return((mean(v), sqrt(variance(v)), lsm_mcse(v, C), srt[max((1, ceil(0.025 * S)))], srt[min((S, floor(0.975 * S) + 1))]))
 }
 
 // centre the positions and rotate them to their principal axes (a rigid motion; positions are identified up to such motions only)
@@ -416,29 +516,36 @@ void LsmFit(real matrix y, real scalar dir, real matrix X, real scalar d, real s
 	real rowvector opt, string rowvector nm)
 {
 	class LsmNat scalar N
-	real scalar n, nc, K, S, k, it, rows_, off, nd, matok, na, t, i
-	real rowvector prior, pvar, b0, flags, mb, act
-	real matrix Z0, beta, Zs, Dbar, Zm, Za, Zr, T, EP, Pm, VT, Es, Ev, Eall, EPrior, E0, Em
-	real colvector res, llk, s2, srt, shift
+	real scalar n, nc, K, S, Sc, C, G, ng, k, it, rows_, off, nd, matok, na, t, i, g2, bi
+	real rowvector prior, pvar, b0, flags, mb, act, cl
+	real matrix Z0, beta, Zs, Dbar, Zm, Za, Zr, T, EP, Pm, VT, Es, Ev, Eall, EPrior, E0, Em, S2, RH, Mu, Lam, Kd, PI, Q, S2r, Lr, Kr, MUa, R, Zi
+	real colvector res, llk, srt, shift, cls
 	string scalar Dn
+	string rowvector vn
 
 	n = rows(y)
 	nc = rows(X) / n
 	K = nc + 1
-	S = nsample
+	C = opt[12]
+	G = opt[14]
+	ng = max((G, 1))
+	Sc = ceil(nsample / C)
+	S = Sc * C
 	nd = n * d
 	flags = opt[1..4]
 	act = opt[1..3]
 	na = sum(act)
 	pvar = lsm_priorvar(X, n, dir, 9)
 	prior = (0.125 * n^(2 / d), sqrt(n), 0.125 * n^(2 / d))
+	cl = J(1, 5, 0)
+	if (G > 0) cl = (G, 0.125 * (n / G)^(2 / d), sqrt(n / G), 2 * 0.125 * n^(2 / d), sqrt(n / G))
 	EPrior = (opt[5], opt[6], opt[5] \ opt[7], opt[8], opt[7] \ opt[9], opt[10], opt[9])
 	E0 = J(n, 3, 0)
 	lsm_start(y, dir, X, d, random, seed, Z0, b0, flags[4])
 	N.open()
-	N.setup(y, dir, X, d, prior, pvar, b0, Z0, flags, EPrior, E0)
-	rows_ = 2 * K + 8 + S * K + 2 * S + 3 * S + S * nd + na * S * n + 2 * n * n + nd + K + na * n + 3
-	res = N.call(sprintf("10 %f %f %f %f %f %f %f %f %f %f %f %f", N.L, seed, burnin, interval, S, pilot, plen, 0.6, 0.6, 0.234, 0.6, opt[11]), rows_)
+	N.setup(y, dir, X, d, prior, pvar, b0, Z0, flags, EPrior, E0, cl)
+	rows_ = 2 * K + 8 + S * K + S + S * ng + 3 * S + S * nd + na * S * n + (G > 0 ? S * G * d + S * G + S * n : 0) + 2 * n * n + nd + K + na * n + 3
+	res = N.call(sprintf("10 %f %f %f %f %f %f %f %f %f %f %f %f %f %f", N.L, seed, burnin, interval, Sc, pilot, plen, 0.6, 0.6, 0.234, 0.6, opt[11], C, opt[13]), rows_)
 	N.close()
 	if (hasmissing(res)) {
 		errprintf("nwlsm: the sampler returned missing values\n")
@@ -449,8 +556,8 @@ void LsmFit(real matrix y, real scalar dir, real matrix X, real scalar d, real s
 	off = off + S * K
 	llk = res[(off + 1)..(off + S)]
 	off = off + S
-	s2 = res[(off + 1)..(off + S)]
-	off = off + S
+	S2 = colshape(res[(off + 1)..(off + S * ng)], ng)
+	off = off + S * ng
 	Ev = colshape(res[(off + 1)..(off + 3 * S)]', S)'
 	off = off + 3 * S
 	Zs = colshape(res[(off + 1)..(off + S * nd)], nd)
@@ -461,6 +568,14 @@ void LsmFit(real matrix y, real scalar dir, real matrix X, real scalar d, real s
 			Eall[., ((t - 1) * n + 1)..(t * n)] = colshape(res[(off + 1)..(off + S * n)], n)
 			off = off + S * n
 		}
+	}
+	if (G > 0) {
+		Mu = colshape(res[(off + 1)..(off + S * G * d)], G * d)
+		off = off + S * G * d
+		Lam = colshape(res[(off + 1)..(off + S * G)], G)
+		off = off + S * G
+		Kd = colshape(res[(off + 1)..(off + S * n)], n)
+		off = off + S * n
 	}
 	Dbar = colshape(res[(off + 1)..(off + n * n)], n)
 	off = off + n * n
@@ -477,10 +592,10 @@ void LsmFit(real matrix y, real scalar dir, real matrix X, real scalar d, real s
 			off = off + n
 		}
 	}
-	off = off + 0
 	st_local("__mklstart", strofreal(res[off + 1]))
 	st_local("__mkliter", strofreal(res[off + 2]))
 	st_local("__mklobj", strofreal(res[off + 3], "%18.10g"))
+	bi = res[off + 1]
 	// MKL: intercept absorbs the means of the effects (sociality enters twice), the positions are centred
 	shift = 0
 	if (act[1]) {
@@ -497,11 +612,26 @@ void LsmFit(real matrix y, real scalar dir, real matrix X, real scalar d, real s
 	}
 	mb[1] = mb[1] + shift
 	Zm = lsm_ztrans(Zm, flags[4])
+	// label correction of the clusters
+	if (G > 0) {
+		lsm_relabel(Kd, G, bi, PI, Q)
+		S2r = J(S, G, .)
+		Lr = J(S, G, .)
+		for (it = 1; it <= S; it++) {
+			for (g2 = 1; g2 <= G; g2++) {
+				S2r[it, PI[it, g2]] = S2[it, g2]
+				Lr[it, PI[it, g2]] = Lam[it, g2]
+			}
+			Kd[it, .] = PI[it, Kd[it, .]]
+		}
+		S2 = S2r
+		Lam = Lr
+	}
 	// summary of the coefficients
 	T = J(K, 5, .)
 	T[., 1] = mean(beta)'
 	T[., 2] = sqrt(diagonal(variance(beta)))
-	T[., 3] = lsm_mcse(beta)'
+	T[., 3] = lsm_mcse(beta, C)'
 	for (k = 1; k <= K; k++) {
 		srt = sort(beta[., k], 1)
 		T[k, 4] = srt[max((1, ceil(0.025 * S)))]
@@ -510,15 +640,36 @@ void LsmFit(real matrix y, real scalar dir, real matrix X, real scalar d, real s
 	st_matrix(nm[1], mean(beta))
 	st_matrix(nm[2], variance(beta))
 	st_matrix(nm[3], T)
-	// variance parameters: sigma2 of the positions, then the active effects
-	VT = lsm_vartable(s2)
-	for (t = 1; t <= 3; t++) if (act[t]) VT = VT \ lsm_vartable(Ev[., t])
+	// variance parameters: sigma2 of the positions (one per cluster with clusters), then the active effects
+	VT = J(0, 5, .)
+	for (k = 1; k <= ng; k++) VT = VT \ lsm_vartable(S2[., k], C)
+	for (t = 1; t <= 3; t++) if (act[t]) VT = VT \ lsm_vartable(Ev[., t], C)
 	st_matrix(nm[11], VT)
-	// positions: the mean of the draws, each aligned (rotation, reflection) to the MKL positions
+	// Gelman-Rubin statistics (several chains): coefficients, log likelihood, variance parameters
+	if (C > 1) {
+		RH = lsm_rhat(beta, C)' \ lsm_rhat(llk, C)
+		for (k = 1; k <= ng; k++) RH = RH \ lsm_rhat(S2[., k], C)
+		for (t = 1; t <= 3; t++) if (act[t]) RH = RH \ lsm_rhat(Ev[., t], C)
+		st_matrix(nm[15], RH)
+	}
+	// positions: the mean of the draws, each aligned (rotation, reflection) to the MKL positions; the cluster means follow the same rotations
 	Zr = Zm
 	Za = J(n, d, 0)
+	MUa = J(G, d, 0)
 	for (it = 1; it <= S; it++) {
-		Za = Za + lsm_procrustes(flags[4] ? colshape(Zs[it, .], d) : colshape(Zs[it, .], d) :- mean(colshape(Zs[it, .], d)), Zr)
+		Zi = colshape(Zs[it, .], d)
+		if (!flags[4]) {
+			if (G > 0) {
+				Mu[it, .] = vec((colshape(Mu[it, .], d) :- mean(Zi))')'
+			}
+			Zi = Zi :- mean(Zi)
+		}
+		R = lsm_procR(Zi, Zr)
+		Za = Za + Zi * R
+		if (G > 0) {
+			Zi = colshape(Mu[it, .], d) * R
+			for (g2 = 1; g2 <= G; g2++) MUa[PI[it, g2], .] = MUa[PI[it, g2], .] + Zi[g2, .] / S
+		}
 	}
 	Za = Za / S
 	// effects: posterior mean and sd
@@ -535,22 +686,34 @@ void LsmFit(real matrix y, real scalar dir, real matrix X, real scalar d, real s
 		st_matrix(nm[7], Pm)
 		st_matrix(nm[9], Za)
 		st_matrix(nm[10], Em)
+		if (G > 0) st_matrix(nm[16], Q)
+	}
+	if (G > 0) {
+		// hard classification: the most probable cluster (ties: the lower number)
+		st_matrix(nm[17], MUa)
+		st_matrix(nm[18], (mean(Lam)', sqrt(diagonal(variance(Lam)))))
+		if (matok) {
+			cls = J(n, 1, .)
+			for (i = 1; i <= n; i++) cls[i] = selectindex(Q[i, .] :== max(Q[i, .]))[1]
+			st_matrix(nm[19], cls)
+		}
 	}
 	st_matrix(nm[8], mb)
 	st_matrix(nm[6], (res[1..(K + 1)]', res[(K + 2)..(K + 4)]' \ res[(K + 5)..(2 * K + 5)]', res[(2 * K + 6)..(2 * K + 8)]'))
 	st_local("__matok", strofreal(matok))
 	st_local("__llk", strofreal(mean(llk), "%18.10g"))
 	st_local("__llksd", strofreal(sqrt(variance(llk)), "%18.10g"))
-	st_local("__s2", strofreal(mean(s2), "%18.10g"))
-	st_local("__s2sd", strofreal(sqrt(variance(s2)), "%18.10g"))
-	st_local("__priorscale", strofreal(prior[1], "%18.10g"))
-	st_local("__priordf", strofreal(prior[2], "%18.10g"))
+	st_local("__s2", strofreal(mean(S2[., 1]), "%18.10g"))
+	st_local("__s2sd", strofreal(sqrt(variance(S2[., 1])), "%18.10g"))
+	st_local("__nsample_total", strofreal(S))
+	st_local("__priorscale", strofreal(G > 0 ? cl[2] : prior[1], "%18.10g"))
+	st_local("__priordf", strofreal(G > 0 ? cl[3] : prior[2], "%18.10g"))
 	st_matrix(nm[4] + "_pv", pvar)
 	st_matrix(nm[4] + "_b0", b0)
-	external __nwlsm_beta, __nwlsm_llk, __nwlsm_s2, __nwlsm_Z, __nwlsm_D, __nwlsm_ZA, __nwlsm_ev, __nwlsm_E, __nwlsm_P, __nwlsm_MZ
+	external __nwlsm_beta, __nwlsm_llk, __nwlsm_s2, __nwlsm_Z, __nwlsm_D, __nwlsm_ZA, __nwlsm_ev, __nwlsm_E, __nwlsm_P, __nwlsm_MZ, __nwlsm_C, __nwlsm_K, __nwlsm_lam
 	__nwlsm_beta = beta
 	__nwlsm_llk = llk
-	__nwlsm_s2 = s2
+	__nwlsm_s2 = S2
 	__nwlsm_Z = Zs
 	__nwlsm_D = Dbar
 	__nwlsm_ZA = Za
@@ -558,13 +721,19 @@ void LsmFit(real matrix y, real scalar dir, real matrix X, real scalar d, real s
 	__nwlsm_E = Eall
 	__nwlsm_P = Pm
 	__nwlsm_MZ = Zm
+	__nwlsm_C = C
+	__nwlsm_K = (G > 0 ? Kd : J(0, 0, .))
+	__nwlsm_lam = (G > 0 ? Lam : J(0, 0, .))
 }
 
 // the posterior sample kept in Mata by the last fit: LsmSample("beta"), "llk", "s2", "ev", "E", "Z" (one row per draw), "D", "P", "Zalign", "mkl"
 transmorphic matrix LsmSample(string scalar what)
 {
-	external __nwlsm_beta, __nwlsm_llk, __nwlsm_s2, __nwlsm_Z, __nwlsm_D, __nwlsm_ZA, __nwlsm_ev, __nwlsm_E, __nwlsm_P, __nwlsm_MZ
+	external __nwlsm_beta, __nwlsm_llk, __nwlsm_s2, __nwlsm_Z, __nwlsm_D, __nwlsm_ZA, __nwlsm_ev, __nwlsm_E, __nwlsm_P, __nwlsm_MZ, __nwlsm_C, __nwlsm_K, __nwlsm_lam
 
+	if (what == "chains") return(__nwlsm_C)
+	if (what == "class") return(__nwlsm_K)
+	if (what == "lambda") return(__nwlsm_lam)
 	if (what == "beta") return(__nwlsm_beta)
 	if (what == "llk") return(__nwlsm_llk)
 	if (what == "s2") return(__nwlsm_s2)
@@ -596,8 +765,21 @@ void LsmSaveDraws(string rowvector names, real rowvector act)
 	}
 	(void) st_addvar("double", "loglik")
 	st_store(., "loglik", __nwlsm_llk)
-	(void) st_addvar("double", "sigma2")
-	st_store(., "sigma2", __nwlsm_s2)
+	if (cols(__nwlsm_s2) == 1) {
+		(void) st_addvar("double", "sigma2")
+		st_store(., "sigma2", __nwlsm_s2)
+	}
+	else {
+		for (k = 1; k <= cols(__nwlsm_s2); k++) {
+			(void) st_addvar("double", "sigma2_" + strofreal(k))
+			st_store(., "sigma2_" + strofreal(k), __nwlsm_s2[., k])
+		}
+		external __nwlsm_lam
+		for (k = 1; k <= cols(__nwlsm_lam); k++) {
+			(void) st_addvar("double", "lambda_" + strofreal(k))
+			st_store(., "lambda_" + strofreal(k), __nwlsm_lam[., k])
+		}
+	}
 	vnn = ("sender_var", "receiver_var", "sociality_var")
 	for (k = 1; k <= 3; k++) {
 		if (act[k]) {
@@ -624,7 +806,7 @@ real rowvector LsmCheck(real matrix y, real scalar dir, real matrix X, real scal
 	prior = (1, 1, s2)
 	EPrior = (opt[5], opt[6], opt[5] \ opt[7], opt[8], opt[7] \ opt[9], opt[10], opt[9])
 	N.open()
-	N.setup(y, dir, X, d, prior, pvar, beta, Z, opt[1..4], EPrior, E)
+	N.setup(y, dir, X, d, prior, pvar, beta, Z, opt[1..4], EPrior, E, J(1, 5, 0))
 	r1 = N.call(sprintf("1 %f", N.L), 2)
 	r2 = N.call(sprintf("2 %f %f ", N.L, i) + invtokens(strofreal(znew, "%20.15g")), 1)
 	r3 = 0
@@ -650,7 +832,7 @@ real rowvector LsmCheckMKL(real matrix y, real scalar dir, real matrix X, real s
 	EPrior = (opt[5], opt[6], opt[5] \ opt[7], opt[8], opt[7] \ opt[9], opt[10], opt[9])
 	P = n * d + cols(beta) + n * (opt[1] + opt[2] + opt[3])
 	N.open()
-	N.setup(y, dir, X, d, prior, pvar, beta, Z, opt[1..4], EPrior, E)
+	N.setup(y, dir, X, d, prior, pvar, beta, Z, opt[1..4], EPrior, E, J(1, 5, 0))
 	r = N.call(sprintf("4 %f", N.L), 1 + 2 * P)
 	N.close()
 	return(r')

@@ -22,7 +22,7 @@ program nwlsm, eclass
 	}
 	syntax anything(name=netname) [, Dim(integer 2) EDGEcov(string) ABSdiff(string) NSample(integer 4000) BURNin(integer 10000) ///
 		INTerval(integer 10) SEED(string) PILOT(integer 4) PLEN(integer 500) RANDOMstart SAVEDraws(string) ///
-		SENDER RECEIVER SOCiality SENDERVar(real 1) SENDERDf(real 3) RECEIVERVar(real 1) RECEIVERDf(real 3) SOCIALITYVar(real 1) SOCIALITYDf(real 3) BILinear MKLStarts(integer 5)]
+		SENDER RECEIVER SOCiality SENDERVar(real 1) SENDERDf(real 3) RECEIVERVar(real 1) RECEIVERDf(real 3) SOCIALITYVar(real 1) SOCIALITYDf(real 3) BILinear MKLStarts(integer 1) CHAins(integer 1) THReads(integer 0) CLUsters(integer 0)]
 	if `dim' < 1 | `dim' > 10 {
 		di as error "dim() must be an integer between 1 and 10"
 		error 198
@@ -37,6 +37,22 @@ program nwlsm, eclass
 	}
 	if `mklstarts' < 1 {
 		di as error "mklstarts() must be at least 1"
+		error 198
+	}
+	if `chains' < 1 | `chains' > 64 {
+		di as error "chains() must be an integer between 1 and 64"
+		error 198
+	}
+	if `threads' < 0 | `threads' > 256 {
+		di as error "threads() must be between 1 and 256 (default: one thread per core, at most one per chain)"
+		error 198
+	}
+	if `clusters' != 0 & (`clusters' < 2 | `clusters' > 6) {
+		di as error "clusters() must be an integer between 2 and 6"
+		error 198
+	}
+	if ceil(`nsample' / `chains') < 10 {
+		di as error "nsample() must give at least 10 draws for each of the chains()"
 		error 198
 	}
 	if `"`seed'"' != "" {
@@ -70,7 +86,7 @@ program nwlsm, eclass
 		di as error "sociality cannot be combined with sender or receiver effects in an undirected network"
 		error 198
 	}
-	local __opt "`=("`sender'" != "")' `=("`receiver'" != "")' `=("`sociality'" != "")' `=("`bilinear'" != "")' `sendervar' `senderdf' `receivervar' `receiverdf' `socialityvar' `socialitydf' `mklstarts'"
+	local __opt "`=("`sender'" != "")' `=("`receiver'" != "")' `=("`sociality'" != "")' `=("`bilinear'" != "")' `sendervar' `senderdf' `receivervar' `receiverdf' `socialityvar' `socialitydf' `mklstarts' `chains' `threads' `clusters'"
 	capture mata: mata drop __nwlsm_y __nwlsm_X
 	mata: __nwlsm_y = lsm_ymat(*(`netobj'->get_matrix()))
 	mata: __nwlsm_X = J(0, `nodes', .)
@@ -145,9 +161,9 @@ program nwlsm, eclass
 	}
 	if `"`seed'"' == "" local __seed = floor(runiform() * 2147483646) + 1
 	else local __seed = `seed'
-	tempname B V T D Z ACC PP MB ZM ME VT ES ER EO
+	tempname B V T D Z ACC PP MB ZM ME VT ES ER EO RH QM CM LM CLS
 	capture noisily mata: LsmFit(__nwlsm_y, `__dir', __nwlsm_X, `dim', `nsample', `burnin', `interval', `__seed', `pilot', `plen', ///
-		`=("`randomstart'" != "")', strtoreal(tokens("`__opt'")), ("`B'", "`V'", "`T'", "`D'", "`Z'", "`ACC'", "`PP'", "`MB'", "`ZM'", "`ME'", "`VT'", "`ES'", "`ER'", "`EO'"))
+		`=("`randomstart'" != "")', strtoreal(tokens("`__opt'")), ("`B'", "`V'", "`T'", "`D'", "`Z'", "`ACC'", "`PP'", "`MB'", "`ZM'", "`ME'", "`VT'", "`ES'", "`ER'", "`EO'", "`RH'", "`QM'", "`CM'", "`LM'", "`CLS'"))
 	local __rc = _rc
 	mata: st_local("__ny", strofreal(sum((__nwlsm_y :< .) :& (__nwlsm_y :!= .)) - sum(diagonal(__nwlsm_y) :< .)))
 	capture mata: mata drop __nwlsm_y __nwlsm_X
@@ -165,6 +181,12 @@ program nwlsm, eclass
 	matrix colnames `ACC' = latent `__names' sender receiver sociality
 	matrix rownames `ACC' = acceptance stepsize
 	local __vn sigma2
+	if `clusters' > 0 {
+		local __vn
+		forvalues __g = 1/`clusters' {
+			local __vn `__vn' sigma2_`__g'
+		}
+	}
 	foreach __e of local __effs {
 		local __vn `__vn' `__e'_var
 	}
@@ -172,7 +194,7 @@ program nwlsm, eclass
 	matrix colnames `VT' = mean sd mcse lower95 upper95
 	ereturn post `B' `V', obs(`__ny')
 	ereturn local cmd "nwlsm"
-	ereturn local version "0.3.0"
+	ereturn local version "0.4.0"
 	ereturn local estat_cmd "nwlsm_estat"
 	ereturn local title "Latent space model (`=cond("`bilinear'" != "", "bilinear", "Euclidean distance")'), posterior by MCMC"
 	ereturn local latent = cond("`bilinear'" != "", "bilinear", "euclidean")
@@ -184,7 +206,11 @@ program nwlsm, eclass
 	ereturn local start = cond("`randomstart'" != "", "random", "classical scaling of the geodesic distances")
 	ereturn scalar N_nodes = `nodes'
 	ereturn scalar dim = `dim'
-	ereturn scalar nsample = `nsample'
+	ereturn scalar nsample = `__nsample_total'
+	ereturn scalar chains = `chains'
+	ereturn scalar nsample_chain = `__nsample_total' / `chains'
+	ereturn scalar threads = `=cond(`threads' > 0, `threads', 0)'
+	ereturn scalar clusters = `clusters'
 	ereturn scalar burnin = `burnin'
 	ereturn scalar interval = `interval'
 	ereturn scalar seed = `__seed'
@@ -193,8 +219,10 @@ program nwlsm, eclass
 	ereturn scalar plen = `plen'
 	ereturn scalar ll_mean = `__llk'
 	ereturn scalar ll_sd = `__llksd'
-	ereturn scalar sigma2_mean = `__s2'
-	ereturn scalar sigma2_sd = `__s2sd'
+	if `clusters' == 0 {
+		ereturn scalar sigma2_mean = `__s2'
+		ereturn scalar sigma2_sd = `__s2sd'
+	}
 	ereturn scalar prior_scale = `__priorscale'
 	ereturn scalar prior_df = `__priordf'
 	ereturn scalar mkl_start = `__mklstart'
@@ -203,6 +231,31 @@ program nwlsm, eclass
 	ereturn matrix summary = `T'
 	ereturn matrix vsummary = `VT'
 	ereturn matrix tuning = `ACC'
+	if `chains' > 1 {
+		local __rn : rownames e(summary)
+		local __rn `__rn' loglik `__vn'
+		matrix rownames `RH' = `__rn'
+		matrix colnames `RH' = rhat
+		ereturn matrix rhat = `RH'
+	}
+	if `clusters' > 0 {
+		local __dn
+		forvalues __j = 1/`dim' {
+			local __dn `__dn' dim`__j'
+		}
+		matrix colnames `CM' = `__dn'
+		matrix colnames `LM' = mean sd
+		ereturn matrix cmeans = `CM'
+		ereturn matrix lambda = `LM'
+		if `__matok' {
+			local labs2 : subinstr local labs "," " ", all
+			if `"`labs2'"' != "" capture matrix rownames `QM' = `labs2'
+			if `"`labs2'"' != "" capture matrix rownames `CLS' = `labs2'
+			ereturn matrix Q = `QM'
+			matrix colnames `CLS' = class
+			ereturn matrix class = `CLS'
+		}
+	}
 	matrix colnames `MB' = `__names'
 	matrix rownames `MB' = mkl
 	ereturn matrix mkl_b = `MB'
@@ -264,6 +317,12 @@ program _nwlsm_display
 	di as text "`e(title)'"
 	di as text "Network: " as result "`e(network)'" as text " (" as result e(N_nodes) as text " actors, `e(directed)')" _col(52) as text "Latent dimensions: " as result e(dim)
 	di as text "Draws: " as result e(nsample) as text "  burn-in: " as result e(burnin) as text "  interval: " as result e(interval) _col(52) as text "Seed: " as result e(seed)
+	if e(chains) > 1 di as text "Chains: " as result e(chains) as text " (" as result e(nsample_chain) as text " draws each, pooled)" _c
+	if e(clusters) > 0 {
+		if e(chains) > 1 di as text _col(52) _c
+		di as text "Latent clusters: " as result e(clusters)
+	}
+	else if e(chains) > 1 di
 	di as text "Posterior mean log likelihood: " as result %9.3f e(ll_mean) as text " (sd " as result %6.3f e(ll_sd) as text ")"
 	di as text "{hline 78}"
 	di as text _col(25) %10s "Mean" %10s "Sd" %10s "MC s.e." %11s "Lower 95%" %10s "Upper 95%"
@@ -290,5 +349,13 @@ program _nwlsm_display
 	tempname A
 	matrix `A' = e(tuning)
 	di as text "Acceptance rate of the latent positions: " as result %5.3f `A'[1, 1]
+	if e(chains) > 1 {
+		tempname RH
+		matrix `RH' = e(rhat)
+		mata: st_numscalar("__nwlsm_rmax", max(st_matrix("`RH'")))
+		di as text "Gelman-Rubin statistic: largest value " as result %6.3f scalar(__nwlsm_rmax) as text " (see {bf:estat mcmcdiag})"
+		capture scalar drop __nwlsm_rmax
+	}
+	if e(clusters) > 0 di as text "{p 0 0 2}Latent clusters: {bf:estat clusters} lists the posterior membership probabilities and the classification; cluster means {bf:e(cmeans)}, mixing proportions {bf:e(lambda)}.{p_end}"
 	di as text "{p 0 0 2}Positions: minimum Kullback-Leibler estimate {bf:e(Z)} (also {bf:estat positions}); mean of the draws aligned to it {bf:e(Zmean)}; posterior mean distances {bf:e(D)}; posterior mean tie probabilities {bf:e(P)}. Positions are identified up to rotation, reflection and translation only.{p_end}"
 end

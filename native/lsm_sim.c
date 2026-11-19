@@ -51,12 +51,40 @@
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
+#if SYSTEM == STWIN32
+#include <windows.h>
+#include <process.h>
+#else
+#include <pthread.h>
+#include <unistd.h>
+#endif
 
-#define LSM_PROTOCOL 2
+#define LSM_PROTOCOL 3
 #define HDR 16
 
+/* Threads (pthreads; _beginthreadex on Windows). Only the independent work items (chains, Kullback-Leibler blocks, MKL starts) use them. */
+#if SYSTEM == STWIN32
+typedef HANDLE lsm_thread;
+#define LSM_THREAD_FN unsigned __stdcall
+#define LSM_THREAD_RET return 0
+static int thread_start(lsm_thread *t, unsigned (__stdcall *fn)(void *), void *arg) {
+	*t = (HANDLE)_beginthreadex(NULL, 0, fn, arg, 0, NULL);
+	return *t == 0 ? -1 : 0;
+}
+static void thread_join(lsm_thread t) { WaitForSingleObject(t, INFINITE); CloseHandle(t); }
+static int ncores(void) { SYSTEM_INFO si; GetSystemInfo(&si); return si.dwNumberOfProcessors > 0 ? (int)si.dwNumberOfProcessors : 1; }
+#else
+typedef pthread_t lsm_thread;
+#define LSM_THREAD_FN void *
+#define LSM_THREAD_RET return NULL
+static int thread_start(lsm_thread *t, void *(*fn)(void *), void *arg) { return pthread_create(t, NULL, fn, arg) == 0 ? 0 : -1; }
+static void thread_join(lsm_thread t) { pthread_join(t, NULL); }
+static int ncores(void) { long c = sysconf(_SC_NPROCESSORS_ONLN); return c > 0 ? (int)c : 1; }
+#endif
+
 typedef struct {
-	int n, dir, nc, K, d, flags, lt;
+	int n, dir, nc, K, d, flags, lt, G;
+	double cscale, cdf, cmv, calpha; /* latent clusters: prior scale and df of the cluster variances, variance of the cluster means, Dirichlet parameter */
 	int act[3];
 	double scale, df, s2;
 	double rz, re[3]; /* weak ridge of the MKL fit: precisions of the positions and of the effects */
@@ -358,9 +386,9 @@ static int model_read(Model *g, long L) {
 	for (k = 0; k < HDR; k++) { ST_double v; SF_vdata(1, (ST_int)(k + 1), &v); h[k] = v; }
 	if ((int)h[0] != LSM_PROTOCOL) return 198;
 	n = (int)h[1]; g->n = n; g->dir = (int)h[2]; g->nc = (int)h[3]; g->d = (int)h[4]; g->K = g->nc + 1;
-	g->flags = (int)h[5]; g->lt = (int)h[6];
+	g->flags = (int)h[5]; g->lt = (int)h[6]; g->G = (int)h[7]; g->cscale = h[8]; g->cdf = h[9]; g->cmv = h[10]; g->calpha = h[11];
 	for (t = 0; t < 3; t++) g->act[t] = (g->flags >> t) & 1;
-	if (n < 3 || g->d < 1 || g->nc < 0 || (g->lt != 0 && g->lt != 1)) return 198;
+	if (n < 3 || g->d < 1 || g->nc < 0 || (g->lt != 0 && g->lt != 1) || g->G < 0 || g->G > 12 || (g->G > 0 && (g->cscale <= 0 || g->cdf <= 0 || g->cmv <= 0 || g->calpha <= 0))) return 198;
 	pos = HDR;
 	g->pvar = malloc(sizeof(double) * g->K); g->beta = malloc(sizeof(double) * g->K); g->Z = malloc(sizeof(double) * n * g->d);
 	g->e0 = malloc(sizeof(double) * 3 * n);
@@ -393,37 +421,144 @@ static double gibbs_var(Rng *r, double scale, double df, double ss, double m) {
 	return (df * scale + ss) / (2.0 * rgamma(r, 0.5 * (df + m)));
 }
 
-static int run_chain(State *sp, const Model *gp, char **tok_state, int L) {
-	const Model g = *gp; State s = *sp;
-	int n = g.n, d = g.d, K = g.K, q, k, i, t, ph, S, burn, intv, pil, plen, na = g.act[0] + g.act[1] + g.act[2], rc = 0;
-	double a[11], dz, de[3], *db, ev[3], s2 = g.s2, *newL, *Dsum, *EYsum, zn[64], tgt;
-	long accZn = 0, accZt = 0, accBn[64] = {0}, accEn[3] = {0, 0, 0}, accEt[3] = {0, 0, 0}, nsw, sw, rowbase, nd = (long)n * d;
-	double *dBeta = NULL, *dLlk = NULL, *dS2 = NULL, *dEv = NULL, *dZ = NULL, *dE = NULL;
-	Rng rg; uint64_t seed;
-	char *tok;
-	(void)tok_state; (void)L;
-	if (K > 64) { SF_error("lsm_sim: too many covariates\n"); return 198; }
-	for (q = 0; q < 11; q++) { tok = strtok(NULL, " \t"); a[q] = tok ? atof(tok) : -1.0; }
-	seed = (uint64_t)a[0]; burn = (int)a[1]; intv = (int)a[2]; S = (int)a[3]; pil = (int)a[4]; plen = (int)a[5]; dz = a[6]; tgt = a[8];
-	if (d > 64 || S < 1 || intv < 1 || burn < 0 || pil < 0 || plen < 1 || dz <= 0 || a[7] <= 0 || tgt <= 0 || tgt >= 1 || a[9] <= 0 || a[10] < 1) { SF_error("lsm_sim: bad chain settings\n"); return 198; }
-	db = malloc(sizeof(double) * K);
-	newL = malloc(sizeof(double) * (size_t)n * n); Dsum = calloc((size_t)n * n, sizeof(double)); EYsum = calloc((size_t)n * n, sizeof(double));
-	dBeta = malloc(sizeof(double) * (size_t)S * K); dLlk = malloc(sizeof(double) * S); dS2 = malloc(sizeof(double) * S);
-	dEv = calloc((size_t)S * 3, sizeof(double)); dZ = malloc(sizeof(double) * (size_t)S * nd);
-	dE = malloc(sizeof(double) * (size_t)S * n * 3);
-	if (!db || !newL || !Dsum || !EYsum || !dBeta || !dLlk || !dS2 || !dEv || !dZ || !dE) { SF_error("lsm_sim: not enough memory\n"); rc = 909; goto cleanup; }
-	for (k = 0; k < K; k++) db[k] = a[7];
-	for (t = 0; t < 3; t++) { de[t] = a[9]; ev[t] = g.ev0[t]; }
-	rng_seed(&rg, seed);
+/* ---- latent clusters (latentnet's G): z_i ~ N(mu_K(i), s2_K(i) I), K(i) ~ lambda, mu_g ~ N(0, mv I), s2_g ~ scale-inv-chi2, lambda ~ Dirichlet(alpha) ---- */
+#define MAXG 12
+typedef struct { int G; double *mu, *s2, *lam; int *K; } Clu;
+
+static int clu_alloc(Clu *c, const Model *g) {
+	c->G = g->G;
+	c->mu = calloc((size_t)(g->G > 0 ? g->G : 1) * g->d, sizeof(double)); c->s2 = calloc(g->G > 0 ? g->G : 1, sizeof(double));
+	c->lam = calloc(g->G > 0 ? g->G : 1, sizeof(double)); c->K = calloc(g->n, sizeof(int));
+	return c->mu && c->s2 && c->lam && c->K;
+}
+static void clu_free(Clu *c) { free(c->mu); free(c->s2); free(c->lam); free(c->K); }
+
+/* start: k-means (farthest-point seeds, 30 Lloyd iterations) of the start positions; the variances start at the prior scale */
+static void clu_init(const Model *g, const double *Z, Clu *c) {
+	int n = g->n, d = g->d, G = g->G, i, j, k, it, first = 0;
+	double *cnt = calloc(G, sizeof(double)), *mind = malloc(sizeof(double) * n);
+	for (i = 0; i < n; i++) mind[i] = 1e300;
+	for (k = 0; k < G; k++) {
+		int far = first;
+		if (k > 0) { double best = -1; for (i = 0; i < n; i++) if (mind[i] > best) { best = mind[i]; far = i; } }
+		for (j = 0; j < d; j++) c->mu[k * d + j] = Z[far * d + j];
+		for (i = 0; i < n; i++) { double s = 0; for (j = 0; j < d; j++) { double t = Z[i * d + j] - c->mu[k * d + j]; s += t * t; } if (s < mind[i]) mind[i] = s; }
+	}
+	for (it = 0; it < 30; it++) {
+		int changed = 0;
+		for (i = 0; i < n; i++) {
+			int bk = 0; double bd = 1e300;
+			for (k = 0; k < G; k++) { double s = 0; for (j = 0; j < d; j++) { double t = Z[i * d + j] - c->mu[k * d + j]; s += t * t; } if (s < bd) { bd = s; bk = k; } }
+			if (c->K[i] != bk || it == 0) changed = 1;
+			c->K[i] = bk;
+		}
+		for (k = 0; k < G; k++) cnt[k] = 0;
+		{ double *sm = calloc((size_t)G * d, sizeof(double));
+		  for (i = 0; i < n; i++) { cnt[c->K[i]] += 1; for (j = 0; j < d; j++) sm[c->K[i] * d + j] += Z[i * d + j]; }
+		  for (k = 0; k < G; k++) if (cnt[k] > 0) for (j = 0; j < d; j++) c->mu[k * d + j] = sm[k * d + j] / cnt[k];
+		  free(sm); }
+		if (!changed) break;
+	}
+	for (k = 0; k < G; k++) { c->s2[k] = g->cscale; c->lam[k] = 1.0 / G; }
+	free(cnt); free(mind);
+}
+
+/* one Gibbs pass: memberships, means, variances, mixing proportions */
+static void clu_gibbs(Rng *r, const Model *g, const double *Z, Clu *c) {
+	int n = g->n, d = g->d, G = g->G, i, j, k;
+	double cnt[MAXG], ss[MAXG], lp[MAXG], *sm = calloc((size_t)G * d, sizeof(double)), tot;
+	for (i = 0; i < n; i++) {
+		double mx = -1e300, u, acc = 0.0; int pick = G - 1;
+		for (k = 0; k < G; k++) {
+			double q = 0; for (j = 0; j < d; j++) { double t = Z[i * d + j] - c->mu[k * d + j]; q += t * t; }
+			lp[k] = log(c->lam[k]) - 0.5 * d * log(c->s2[k]) - q / (2.0 * c->s2[k]);
+			if (lp[k] > mx) mx = lp[k];
+		}
+		tot = 0; for (k = 0; k < G; k++) { lp[k] = exp(lp[k] - mx); tot += lp[k]; }
+		u = runif(r) * tot;
+		for (k = 0; k < G; k++) { acc += lp[k]; if (u < acc) { pick = k; break; } }
+		c->K[i] = pick;
+	}
+	for (k = 0; k < G; k++) { cnt[k] = 0; ss[k] = 0; }
+	for (i = 0; i < n; i++) { cnt[c->K[i]] += 1; for (j = 0; j < d; j++) sm[c->K[i] * d + j] += Z[i * d + j]; }
+	for (k = 0; k < G; k++) for (j = 0; j < d; j++) {
+		double prec = 1.0 / g->cmv + cnt[k] / c->s2[k], mean = (sm[k * d + j] / c->s2[k]) / prec;
+		c->mu[k * d + j] = mean + rnorm(r) / sqrt(prec);
+	}
+	for (i = 0; i < n; i++) for (j = 0; j < d; j++) { double t = Z[i * d + j] - c->mu[c->K[i] * d + j]; ss[c->K[i]] += t * t; }
+	for (k = 0; k < G; k++) c->s2[k] = gibbs_var(r, g->cscale, g->cdf, ss[k], cnt[k] * d);
+	tot = 0;
+	for (k = 0; k < G; k++) { lp[k] = rgamma(r, g->calpha + cnt[k]); tot += lp[k]; }
+	for (k = 0; k < G; k++) c->lam[k] = lp[k] / tot;
+	free(sm);
+}
+
+/* ---- threads: no Stata plugin interface call is made from a worker thread ---- */
+typedef struct { void (*fn)(void *, int); void *ctx; int tid, T, count; } PJob;
+static LSM_THREAD_FN pworker(void *a) {
+	PJob *j = (PJob *)a; int k;
+	for (k = j->tid; k < j->count; k += j->T) j->fn(j->ctx, k);
+	LSM_THREAD_RET;
+}
+/* runs fn(ctx, 0..count-1) on up to T threads (the calling thread is thread 0); the work items are independent, so the result does not depend on T */
+static void par_run(int T, int count, void (*fn)(void *, int), void *ctx) {
+	int k; PJob *jobs; lsm_thread *th; char *started;
+	if (T > count) T = count;
+	if (T > 256) T = 256;
+	if (T < 1) T = 1;
+	jobs = calloc(T, sizeof(PJob)); th = calloc(T, sizeof(lsm_thread)); started = calloc(T, 1);
+	if (!jobs || !th || !started) { free(jobs); free(th); free(started); for (k = 0; k < count; k++) fn(ctx, k); return; }
+	for (k = 0; k < T; k++) { jobs[k].fn = fn; jobs[k].ctx = ctx; jobs[k].tid = k; jobs[k].T = T; jobs[k].count = count; }
+	for (k = 1; k < T; k++) started[k] = (thread_start(&th[k], pworker, &jobs[k]) == 0);
+	(void)pworker(&jobs[0]);
+	for (k = 1; k < T; k++) { if (started[k]) thread_join(th[k]); else (void)pworker(&jobs[k]); }
+	free(jobs); free(th); free(started);
+}
+
+/* ---- one chain ---- */
+typedef struct { int S, burn, intv, pil, plen; double dz, db, de, tgt; } Cfg;
+typedef struct {
+	double *dBeta, *dLlk, *dS2, *dEv, *dZ, *dE, *dMu, *dLam, *dK; /* slices of the pooled draw arrays (draw-major) */
+	double *Dsum, *EYsum;                                          /* own, n x n */
+	uint64_t seed0;
+	double accZ, accB[64], accE[3], stepZ, stepB[64], stepE[3];
+	int rc;
+} COut;
+typedef struct { const Model *g; const Cfg *cfg; uint64_t seed; COut *o; } CJob;
+
+static void chain_run(void *ctx, int idx) {
+	CJob *J = (CJob *)ctx + idx;
+	const Model *gp = J->g; const Model g = *gp; const Cfg *cf = J->cfg; COut *o = J->o;
+	State s; Clu cl; Rng rg;
+	int n = g.n, d = g.d, K = g.K, k, i, t, ph, S = cf->S, G = g.G, ng = G > 0 ? G : 1, intv = cf->intv, plen = cf->plen;
+	double dz = cf->dz, de[3], *db, ev[3], s2 = g.s2, *newL, zn[64], tgt = cf->tgt;
+	long accZn = 0, accZt = 0, accBn[64] = {0}, accEn[3] = {0, 0, 0}, accEt[3] = {0, 0, 0}, nsw, sw, nd = (long)n * d;
+	o->rc = 0;
+	memset(&s, 0, sizeof(s)); memset(&cl, 0, sizeof(cl));
+	db = malloc(sizeof(double) * K); newL = malloc(sizeof(double) * (size_t)n * n);
+	o->Dsum = calloc((size_t)n * n, sizeof(double)); o->EYsum = calloc((size_t)n * n, sizeof(double));
+	if (!db || !newL || !o->Dsum || !o->EYsum || !state_alloc(&s, gp) || !clu_alloc(&cl, gp)) { o->rc = 909; goto done; }
+	rng_seed(&rg, J->seed);
+	memcpy(s.beta, g.beta, sizeof(double) * K); memcpy(s.Z, g.Z, sizeof(double) * nd);
+	for (t = 0; t < 3; t++) memcpy(s.eff[t], g.e0 + (long)t * n, sizeof(double) * n);
+	if (J->seed != J->o->seed0) { /* chains after the first start from over-dispersed positions */
+		double sd = 0.5 * sqrt(sumsq(s.Z, (int)nd) / (double)nd + 1e-12);
+		for (k = 0; k < (int)nd; k++) s.Z[k] += sd * rnorm(&rg);
+	}
+	state_rebuild(&s);
+	if (G > 0) clu_init(gp, s.Z, &cl);
+	for (k = 0; k < K; k++) db[k] = cf->db;
+	for (t = 0; t < 3; t++) { de[t] = cf->de; ev[t] = g.ev0[t]; }
 	for (ph = 0; ph < 3; ph++) {
-		nsw = ph == 0 ? (long)pil * plen : (ph == 1 ? burn : (long)S * intv);
+		nsw = ph == 0 ? (long)cf->pil * plen : (ph == 1 ? cf->burn : (long)S * intv);
 		accZn = accZt = 0; for (k = 0; k < K; k++) accBn[k] = 0; for (t = 0; t < 3; t++) accEn[t] = accEt[t] = 0;
 		for (sw = 0; sw < nsw; sw++) {
 			for (i = 0; i < n; i++) {
-				double dll, dpr, lu;
+				double dll, dpr, lu; const double *mu = G > 0 ? cl.mu + cl.K[i] * d : NULL; double v = G > 0 ? cl.s2[cl.K[i]] : s2;
 				for (k = 0; k < d; k++) zn[k] = s.Z[i * d + k] + dz * rnorm(&rg);
 				dll = actor_dll(&s, i, zn);
-				dpr = -(sumsq(zn, d) - sumsq(s.Z + i * d, d)) / (2.0 * s2);
+				if (mu) { double a1 = 0, a0 = 0; for (k = 0; k < d; k++) { double t1 = zn[k] - mu[k], t0 = s.Z[i * d + k] - mu[k]; a1 += t1 * t1; a0 += t0 * t0; } dpr = -(a1 - a0) / (2.0 * v); }
+				else dpr = -(sumsq(zn, d) - sumsq(s.Z + i * d, d)) / (2.0 * v);
 				lu = log(runif(&rg)); accZt++;
 				if (lu < dll + dpr) { actor_commit(&s, i, zn); accZn++; }
 			}
@@ -444,7 +579,8 @@ static int run_chain(State *sp, const Model *gp, char **tok_state, int L) {
 				lu = log(runif(&rg));
 				if (lu < dll + dpr) { beta_commit(&s, k, delta, newL); accBn[k]++; }
 			}
-			s2 = gibbs_var(&rg, g.scale, g.df, sumsq(s.Z, n * d), (double)n * d);
+			if (G > 0) clu_gibbs(&rg, gp, s.Z, &cl);
+			else s2 = gibbs_var(&rg, g.scale, g.df, sumsq(s.Z, n * d), (double)n * d);
 			for (t = 0; t < 3; t++) if (g.act[t]) ev[t] = gibbs_var(&rg, g.es[t], g.edf[t], sumsq(s.eff[t], n), (double)n);
 			if (ph == 0 && (sw + 1) % plen == 0) {
 				double f = ((double)accZn / (double)accZt) / tgt;
@@ -456,89 +592,150 @@ static int run_chain(State *sp, const Model *gp, char **tok_state, int L) {
 			}
 			if (ph == 2 && (sw + 1) % intv == 0) {
 				long dr = (sw + 1) / intv - 1; int j;
-				for (k = 0; k < K; k++) dBeta[dr * K + k] = s.beta[k];
-				dLlk[dr] = state_ll(&s); dS2[dr] = s2;
-				for (t = 0; t < 3; t++) dEv[t * (long)S + dr] = g.act[t] ? ev[t] : 0.0;
-				memcpy(dZ + dr * nd, s.Z, sizeof(double) * nd);
-				for (t = 0; t < 3; t++) memcpy(dE + ((long)t * S + dr) * n, s.eff[t], sizeof(double) * n);
+				for (k = 0; k < K; k++) o->dBeta[dr * K + k] = s.beta[k];
+				o->dLlk[dr] = state_ll(&s);
+				if (G > 0) {
+					for (k = 0; k < G; k++) { o->dS2[dr * ng + k] = cl.s2[k]; o->dLam[dr * G + k] = cl.lam[k]; }
+					memcpy(o->dMu + dr * G * d, cl.mu, sizeof(double) * (size_t)G * d);
+					for (i = 0; i < n; i++) o->dK[dr * n + i] = (double)(cl.K[i] + 1);
+				} else o->dS2[dr] = s2;
+				for (t = 0; t < 3; t++) o->dEv[dr * 3 + t] = g.act[t] ? ev[t] : 0.0;
+				memcpy(o->dZ + dr * nd, s.Z, sizeof(double) * nd);
+				for (t = 0; t < 3; t++) memcpy(o->dE + (dr * 3 + t) * n, s.eff[t], sizeof(double) * n);
 				for (i = 0; i < n; i++) for (j = 0; j < n; j++) {
-					Dsum[i * n + j] += s.D[i * n + j];
-					if (i != j) EYsum[i * n + j] += 1.0 / (1.0 + exp(-(s.lin[i * n + j] - s.D[i * n + j])));
+					o->Dsum[i * n + j] += s.D[i * n + j];
+					if (i != j) o->EYsum[i * n + j] += 1.0 / (1.0 + exp(-(s.lin[i * n + j] - s.D[i * n + j])));
 				}
 			}
 		}
 	}
-	/* ---- write the sample ---- */
-	rowbase = 2L * K + 8;
-	SF_vstore(2, 1, (double)accZn / (double)accZt);
-	for (k = 0; k < K; k++) { SF_vstore(2, (ST_int)(2 + k), (double)accBn[k] / (double)nsw); SF_vstore(2, (ST_int)(K + 6 + k), db[k]); }
-	for (t = 0; t < 3; t++) { SF_vstore(2, (ST_int)(K + 2 + t), g.act[t] ? (double)accEn[t] / (double)(accEt[t] > 0 ? accEt[t] : 1) : 0.0); SF_vstore(2, (ST_int)(2 * K + 6 + t), g.act[t] ? de[t] : 0.0); }
-	SF_vstore(2, (ST_int)(K + 5), dz);
+	o->accZ = (double)accZn / (double)accZt;
+	for (k = 0; k < K; k++) { o->accB[k] = (double)accBn[k] / (double)nsw; o->stepB[k] = db[k]; }
+	for (t = 0; t < 3; t++) { o->accE[t] = g.act[t] ? (double)accEn[t] / (double)(accEt[t] > 0 ? accEt[t] : 1) : 0.0; o->stepE[t] = g.act[t] ? de[t] : 0.0; }
+	o->stepZ = dz;
+done:
+	free(db); free(newL); state_free(&s); clu_free(&cl);
+}
+
+/* Kullback-Leibler divergence of every draw's tie probabilities from the posterior mean probabilities (blocks of draws are independent work items) */
+typedef struct { const Model *g; const double *EY, *dBeta, *dE, *dZ; double *kls; int S, nblk; } KLJob;
+static void kl_block(void *ctx, int b) {
+	KLJob *J = (KLJob *)ctx; const Model *g = J->g; int n = g->n, d = g->d, K = g->K, i, j, t;
+	long nd = (long)n * d, dr, lo = (long)b * J->S / J->nblk, hi = (long)(b + 1) * J->S / J->nblk;
+	for (dr = lo; dr < hi; dr++) {
+		double kl = 0.0; const double *Zd = J->dZ + dr * nd, *be = J->dBeta + dr * K, *ef[3];
+		for (t = 0; t < 3; t++) ef[t] = J->dE + (dr * 3 + t) * n;
+		for (i = 0; i < n; i++) for (j = g->dir ? 0 : i + 1; j < n; j++) {
+			double eta;
+			if (i == j || g->y[i * n + j] < 0) continue;
+			eta = linpred(g, be, ef, i, j) - latt(g->lt, d, Zd + i * d, Zd + j * d);
+			kl += log1pexp(eta) - J->EY[i * n + j] * eta;
+		}
+		J->kls[dr] = kl;
+	}
+}
+/* one start of the MKL optimisation */
+typedef struct { const Model *gm; const double *EY, *dBeta, *dE, *dZ; const long *sel; double *xs, *fo; int *its; int S; } MKJob;
+static void mkl_start(void *ctx, int c) {
+	MKJob *J = (MKJob *)ctx; const Model *g = J->gm; int n = g->n, d = g->d, K = g->K, P = mkl_P(g), t; long nd = (long)n * d, b = J->sel[c];
+	double *x0 = J->xs + (size_t)c * P;
+	memcpy(x0, J->dZ + b * nd, sizeof(double) * nd);
+	memcpy(x0 + nd, J->dBeta + b * K, sizeof(double) * K);
+	{ int off2 = (int)nd + K; for (t = 0; t < 3; t++) if (g->act[t]) { memcpy(x0 + off2, J->dE + (b * 3 + t) * n, sizeof(double) * n); off2 += n; } }
+	J->its[c] = mkl_lbfgs(g, J->EY, x0, 3000, &J->fo[c]);
+}
+
+static int run_chains(const Model *gp, long L) {
+	const Model g = *gp;
+	int n = g.n, d = g.d, K = g.K, G = g.G, ng = G > 0 ? G : 1, na = g.act[0] + g.act[1] + g.act[2], q, k, t, i, j, C, T, rc = 0, Sc;
+	long nd = (long)n * d, S, dr, m, pos = 0;
+	double a[13], *pBeta = NULL, *pLlk = NULL, *pS2 = NULL, *pEv = NULL, *pZ = NULL, *pE = NULL, *pMu = NULL, *pLam = NULL, *pK = NULL;
+	double *EY = NULL, *Dm = NULL, *kls = NULL, *xs = NULL, *fo = NULL; int *its = NULL; long *sel = NULL;
+	COut *outs = NULL; CJob *jobs = NULL; Cfg cf; char *tok;
+	(void)L;
+	for (q = 0; q < 13; q++) { tok = strtok(NULL, " \t"); a[q] = tok ? atof(tok) : -1.0; }
+	cf.S = (int)a[3]; cf.burn = (int)a[1]; cf.intv = (int)a[2]; cf.pil = (int)a[4]; cf.plen = (int)a[5]; cf.dz = a[6]; cf.db = a[7]; cf.tgt = a[8]; cf.de = a[9];
+	C = (int)a[11]; T = (int)a[12];
+	Sc = cf.S;
+	if (K > 64 || d > 64) { SF_error("lsm_sim: too many covariates\n"); return 198; }
+	if (Sc < 1 || cf.intv < 1 || cf.burn < 0 || cf.pil < 0 || cf.plen < 1 || cf.dz <= 0 || cf.db <= 0 || cf.tgt <= 0 || cf.tgt >= 1 || cf.de <= 0 || a[10] < 1 || C < 1 || C > 256 || T < 0) { SF_error("lsm_sim: bad chain settings\n"); return 198; }
+	S = (long)Sc * C;
+	if (T == 0) T = ncores();
+	outs = calloc(C, sizeof(COut)); jobs = calloc(C, sizeof(CJob));
+	pBeta = malloc(sizeof(double) * S * K); pLlk = malloc(sizeof(double) * S); pS2 = malloc(sizeof(double) * S * ng); pEv = malloc(sizeof(double) * S * 3);
+	pZ = malloc(sizeof(double) * S * nd); pE = malloc(sizeof(double) * S * 3 * n);
+	pMu = malloc(sizeof(double) * S * ng * d); pLam = malloc(sizeof(double) * S * ng); pK = malloc(sizeof(double) * S * n);
+	EY = calloc((size_t)n * n, sizeof(double)); Dm = calloc((size_t)n * n, sizeof(double));
+	if (!outs || !jobs || !pBeta || !pLlk || !pS2 || !pEv || !pZ || !pE || !pMu || !pLam || !pK || !EY || !Dm) { SF_error("lsm_sim: not enough memory\n"); rc = 909; goto cleanup; }
+	for (k = 0; k < C; k++) {
+		long o = (long)k * Sc;
+		outs[k].dBeta = pBeta + o * K; outs[k].dLlk = pLlk + o; outs[k].dS2 = pS2 + o * ng; outs[k].dEv = pEv + o * 3; outs[k].dZ = pZ + o * nd;
+		outs[k].dE = pE + o * 3 * n; outs[k].dMu = pMu + o * ng * d; outs[k].dLam = pLam + o * ng; outs[k].dK = pK + o * n;
+		jobs[k].g = gp; jobs[k].cfg = &cf; jobs[k].seed = (uint64_t)a[0] + 1000003ULL * (uint64_t)k; jobs[k].o = &outs[k];
+		outs[k].seed0 = (uint64_t)a[0];
+	}
+	par_run(T, C, chain_run, jobs);
+	for (k = 0; k < C; k++) if (outs[k].rc) { SF_error("lsm_sim: a chain failed (not enough memory?)\n"); rc = outs[k].rc; goto cleanup; }
+	for (k = 0; k < C; k++) for (m = 0; m < (long)n * n; m++) { Dm[m] += outs[k].Dsum[m] / (double)S; EY[m] += outs[k].EYsum[m] / (double)S; }
+	/* ---- minimum Kullback-Leibler estimate ---- */
 	{
-		long off = rowbase, m;  
-		for (m = 0; m < (long)S * K; m++) SF_vstore(2, (ST_int)(1 + off + m), dBeta[m]);
-		off += (long)S * K;
-		for (m = 0; m < S; m++) SF_vstore(2, (ST_int)(1 + off + m), dLlk[m]);
-		off += S;
-		for (m = 0; m < S; m++) SF_vstore(2, (ST_int)(1 + off + m), dS2[m]);
-		off += S;
-		for (m = 0; m < 3L * S; m++) SF_vstore(2, (ST_int)(1 + off + m), dEv[m]);
-		off += 3L * S;
-		for (m = 0; m < (long)S * nd; m++) SF_vstore(2, (ST_int)(1 + off + m), dZ[m]);
-		off += (long)S * nd;
-		for (t = 0; t < 3; t++) if (g.act[t]) {
-			for (m = 0; m < (long)S * n; m++) SF_vstore(2, (ST_int)(1 + off + m), dE[(long)t * S * n + m]);
-			off += (long)S * n;
+		int P = mkl_P(&g), ms = (int)a[10], c, nblk, itbest = 0; long bi = 0; double fbest = 0, ms2 = 0.0, mev[3] = {0, 0, 0};
+		Model gm = g; KLJob kj; MKJob mj;
+		for (dr = 0; dr < S; dr++) { for (k = 0; k < ng; k++) ms2 += pS2[dr * ng + k] / ((double)S * ng); for (t = 0; t < 3; t++) mev[t] += pEv[dr * 3 + t] / (double)S; }
+		/* a very weak ridge (1/1000 of the posterior precision) keeps the optimiser from running away along flat directions */
+		gm.rz = 1e-3 / ms2; for (t = 0; t < 3; t++) gm.re[t] = g.act[t] ? 1e-3 / mev[t] : 0.0;
+		kls = malloc(sizeof(double) * S);
+		if (!kls) { SF_error("lsm_sim: not enough memory\n"); rc = 909; goto cleanup; }
+		nblk = S < 64 ? (int)S : 64;
+		kj.g = &g; kj.EY = EY; kj.dBeta = pBeta; kj.dE = pE; kj.dZ = pZ; kj.kls = kls; kj.S = (int)S; kj.nblk = nblk;
+		par_run(T, nblk, kl_block, &kj);
+		if (ms > S) ms = (int)S;
+		sel = malloc(sizeof(long) * ms); xs = malloc(sizeof(double) * (size_t)P * ms); fo = malloc(sizeof(double) * ms); its = malloc(sizeof(int) * ms);
+		if (!sel || !xs || !fo || !its) { SF_error("lsm_sim: not enough memory\n"); rc = 909; goto cleanup; }
+		/* the ms draws with the smallest Kullback-Leibler divergence are the starts; the best optimum is kept */
+		for (c = 0; c < ms; c++) {
+			long b = -1;
+			for (dr = 0; dr < S; dr++) if (kls[dr] < 1e300 && (b < 0 || kls[dr] < kls[b])) b = dr;
+			kls[b] = 1e300; sel[c] = b;
 		}
-		for (m = 0; m < (long)n * n; m++) SF_vstore(2, (ST_int)(1 + off + m), Dsum[m] / S);
-		off += (long)n * n;
-		for (m = 0; m < (long)n * n; m++) SF_vstore(2, (ST_int)(1 + off + m), EYsum[m] / S);
-		/* ---- MKL ---- */
-		{
-			double *EY = EYsum, *x0, *xb, *kls, fopt = 0, fbest = 0; long bi = 0; int P = mkl_P(&g), its, dr, ms = (int)a[10], c, itbest = 0, have = 0, j;
-			Model gm = g; double ms2 = 0.0, mev[3] = {0, 0, 0};
-			for (m = 0; m < (long)n * n; m++) EY[m] /= S;
-			for (dr = 0; dr < S; dr++) { ms2 += dS2[dr] / S; for (t = 0; t < 3; t++) mev[t] += dEv[(long)t * S + dr] / S; }
-			/* a very weak ridge (1/1000 of the posterior precision) keeps the optimiser from running away along flat directions */
-			gm.rz = 1e-3 / ms2; for (t = 0; t < 3; t++) gm.re[t] = g.act[t] ? 1e-3 / mev[t] : 0.0;
-			kls = malloc(sizeof(double) * S);
-			x0 = malloc(sizeof(double) * P); xb = malloc(sizeof(double) * P);
-			if (!kls || !x0 || !xb) { SF_error("lsm_sim: not enough memory\n"); rc = 909; free(kls); free(x0); free(xb); goto cleanup; }
-			for (dr = 0; dr < S; dr++) {
-				double kl = 0.0; const double *Zd = dZ + (long)dr * nd; const double *be = dBeta + (long)dr * K; const double *ef[3];
-				for (t = 0; t < 3; t++) ef[t] = dE + ((long)t * S + dr) * n;
-				for (i = 0; i < n; i++) for (j = g.dir ? 0 : i + 1; j < n; j++) {
-					double eta;
-					if (i == j || g.y[i * n + j] < 0) continue;
-					eta = linpred(&g, be, ef, i, j) - latt(g.lt, d, Zd + i * d, Zd + j * d);
-					kl += log1pexp(eta) - EY[i * n + j] * eta;
-				}
-				kls[dr] = kl;
-			}
-			if (ms > S) ms = S;
-			/* the ms draws with the smallest Kullback-Leibler divergence are the starts; the best optimum is kept */
-			for (c = 0; c < ms; c++) {
-				long b = -1;
-				for (dr = 0; dr < S; dr++) if (kls[dr] < 1e300 && (b < 0 || kls[dr] < kls[b])) b = dr;
-				kls[b] = 1e300;
-				if (c == 0) bi = b;
-				memcpy(x0, dZ + b * nd, sizeof(double) * nd);
-				memcpy(x0 + nd, dBeta + b * K, sizeof(double) * K);
-				{ int off2 = (int)nd + K; for (t = 0; t < 3; t++) if (g.act[t]) { memcpy(x0 + off2, dE + ((long)t * S + b) * n, sizeof(double) * n); off2 += n; } }
-				its = mkl_lbfgs(&gm, EY, x0, 3000, &fopt);
-				if (!have || fopt > fbest) { have = 1; fbest = fopt; itbest = its; memcpy(xb, x0, sizeof(double) * P); bi = b; }
-			}
-			fbest = mkl_fg(&g, EY, xb, NULL, P);
-			off += (long)n * n;
-			for (m = 0; m < P; m++) SF_vstore(2, (ST_int)(1 + off + m), xb[m]);
-			off += P;
-			SF_vstore(2, (ST_int)(1 + off), (double)(bi + 1)); SF_vstore(2, (ST_int)(2 + off), (double)itbest); SF_vstore(2, (ST_int)(3 + off), fbest);
-			free(kls); free(x0); free(xb);
+		mj.gm = &gm; mj.EY = EY; mj.dBeta = pBeta; mj.dE = pE; mj.dZ = pZ; mj.sel = sel; mj.xs = xs; mj.fo = fo; mj.its = its; mj.S = (int)S;
+		par_run(T, ms, mkl_start, &mj);
+		{ int have = 0, cbest = 0;
+		  for (c = 0; c < ms; c++) if (!have || fo[c] > fbest) { have = 1; fbest = fo[c]; itbest = its[c]; cbest = c; bi = sel[c]; }
+		  fbest = mkl_fg(&g, EY, xs + (size_t)cbest * P, NULL, P);
+		  /* ---- write the result ---- */
+		  { double ac = 0; int kk;
+		    for (kk = 0; kk < C; kk++) ac += outs[kk].accZ / C;
+		    SF_vstore(2, 1, ac);
+		    for (k = 0; k < K; k++) { double aa = 0; for (kk = 0; kk < C; kk++) aa += outs[kk].accB[k] / C; SF_vstore(2, (ST_int)(2 + k), aa); SF_vstore(2, (ST_int)(K + 6 + k), outs[0].stepB[k]); }
+		    for (t = 0; t < 3; t++) { double aa = 0; for (kk = 0; kk < C; kk++) aa += outs[kk].accE[t] / C; SF_vstore(2, (ST_int)(K + 2 + t), aa); SF_vstore(2, (ST_int)(2 * K + 6 + t), outs[0].stepE[t]); }
+		    SF_vstore(2, (ST_int)(K + 5), outs[0].stepZ);
+		  }
+		  pos = 2L * K + 8;
+#define PUT(v) SF_vstore(2, (ST_int)(++pos), (v))
+		  for (m = 0; m < S * K; m++) PUT(pBeta[m]);
+		  for (m = 0; m < S; m++) PUT(pLlk[m]);
+		  for (m = 0; m < S * ng; m++) PUT(pS2[m]);
+		  for (t = 0; t < 3; t++) for (dr = 0; dr < S; dr++) PUT(pEv[dr * 3 + t]);
+		  for (m = 0; m < S * nd; m++) PUT(pZ[m]);
+		  for (t = 0; t < 3; t++) if (g.act[t]) for (dr = 0; dr < S; dr++) for (i = 0; i < n; i++) PUT(pE[(dr * 3 + t) * n + i]);
+		  if (G > 0) {
+			  for (m = 0; m < S * G * d; m++) PUT(pMu[m]);
+			  for (m = 0; m < S * G; m++) PUT(pLam[m]);
+			  for (m = 0; m < S * n; m++) PUT(pK[m]);
+		  }
+		  for (m = 0; m < (long)n * n; m++) PUT(Dm[m]);
+		  for (m = 0; m < (long)n * n; m++) PUT(EY[m]);
+		  for (m = 0; m < P; m++) PUT(xs[(size_t)cbest * P + m]);
+		  PUT((double)(bi + 1)); PUT((double)itbest); PUT(fbest);
+#undef PUT
 		}
 	}
-	(void)na;
+	(void)na; (void)j;
 cleanup:
-	free(db); free(newL); free(Dsum); free(EYsum); free(dBeta); free(dLlk); free(dS2); free(dEv); free(dZ); free(dE);
+	if (outs) for (k = 0; k < C; k++) { free(outs[k].Dsum); free(outs[k].EYsum); }
+	free(outs); free(jobs); free(pBeta); free(pLlk); free(pS2); free(pEv); free(pZ); free(pE); free(pMu); free(pLam); free(pK);
+	free(EY); free(Dm); free(kls); free(xs); free(fo); free(its); free(sel);
 	return rc;
 }
 
@@ -607,7 +804,7 @@ STDLL stata_call(int argc, char *argv[]) {
 			}
 			free(x); free(gr); free(EY);
 		}
-		else if (code == 10) { rc = run_chain(&s, &g, NULL, (int)L); }
+		else if (code == 10) { rc = run_chains(&g, L); }
 		else { SF_error("lsm_sim: unknown code (plugin and package versions do not match)\n"); rc = 198; }
 	}
 	state_free(&s); model_free(&g); free(buf);

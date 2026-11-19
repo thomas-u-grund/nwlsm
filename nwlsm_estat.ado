@@ -16,6 +16,10 @@ program nwlsm_estat, rclass
 		_nwlsm_mcmcdiag `rest'
 		return add
 	}
+	else if "`subcmd'" == "clusters" {
+		_nwlsm_clusters `rest'
+		return add
+	}
 	else if "`subcmd'" == "predict" {
 		_nwlsm_predict `rest'
 		return add
@@ -108,9 +112,19 @@ program _nwlsm_mcmcdiag, rclass
 	}
 	scalar drop __nwlsm_Sck
 	tempname R
-	mata: __nwlsm_dg = LsmDiag((LsmSample("beta"), LsmSample("llk"), LsmSample("s2")))
+	local C = e(chains)
+	if `C' >= . local C 1
+	local G = e(clusters)
+	if `G' >= . local G 0
+	mata: __nwlsm_dg = LsmDiag((LsmSample("beta"), LsmSample("llk"), LsmSample("s2")), `C')
 	local nm : colnames e(b)
-	local nm `nm' loglik sigma2
+	if `G' > 0 {
+		local nm `nm' loglik
+		forvalues g = 1/`G' {
+			local nm `nm' sigma2_`g'
+		}
+	}
+	else local nm `nm' loglik sigma2
 	local act = 0
 	local effs `"`e(effects)'"'
 	foreach e of local effs {
@@ -122,7 +136,7 @@ program _nwlsm_mcmcdiag, rclass
 		foreach t in sender receiver sociality {
 			local ++k
 			if `: list t in effs' {
-				mata: __nwlsm_dg = __nwlsm_dg \ LsmDiag(LsmSample("ev")[., `k'])
+				mata: __nwlsm_dg = __nwlsm_dg \ LsmDiag(LsmSample("ev")[., `k'], `C')
 				local nm `nm' `t'_var
 			}
 		}
@@ -130,20 +144,26 @@ program _nwlsm_mcmcdiag, rclass
 	mata: st_matrix("`R'", __nwlsm_dg)
 	capture mata: mata drop __nwlsm_dg
 	matrix rownames `R' = `nm'
-	matrix colnames `R' = ess geweke mean sd
+	matrix colnames `R' = ess geweke mean sd rhat
 	local S = e(nsample)
 	if "`nolist'" == "" {
 		di
-		di as text "MCMC diagnostics (" as result e(nsample) as text " draws, interval " as result e(interval) as text ")"
-		di as text "{hline 66}"
-		di as text %-22s "Parameter" %10s "Mean" %10s "Sd" %10s "ESS" %10s "ESS/draw" %10s "Geweke z"
-		di as text "{hline 66}"
+		di as text "MCMC diagnostics (" as result e(nsample) as text " draws" _c
+		if `C' > 1 di as text " in " as result `C' as text " chains" _c
+		di as text ", interval " as result e(interval) as text ")"
+		di as text "{hline 76}"
+		di as text %-22s "Parameter" %10s "Mean" %10s "Sd" %10s "ESS" %10s "ESS/draw" %10s "Geweke z" _c
+		if `C' > 1 di as text %10s "Rhat" _c
+		di
+		di as text "{hline 76}"
 		local k 0
 		foreach c of local nm {
 			local ++k
-			di as text %-22s abbrev("`c'", 21) as result %10.4f `R'[`k', 3] %10.4f `R'[`k', 4] %10.1f `R'[`k', 1] %10.3f `R'[`k', 1] / `S' %10.2f `R'[`k', 2]
+			di as text %-22s abbrev("`c'", 21) as result %10.4f `R'[`k', 3] %10.4f `R'[`k', 4] %10.1f `R'[`k', 1] %10.3f `R'[`k', 1] / `S' %10.2f `R'[`k', 2] _c
+			if `C' > 1 di as result %10.3f `R'[`k', 5] _c
+			di
 		}
-		di as text "{hline 66}"
+		di as text "{hline 76}"
 		tempname A
 		matrix `A' = e(tuning)
 		di as text "Acceptance rates: positions " as result %5.3f `A'[1, 1] _c
@@ -160,6 +180,7 @@ program _nwlsm_mcmcdiag, rclass
 		}
 		di
 		di as text "{p 0 0 2}ESS: effective sample size by the initial monotone positive sequence estimator. Geweke z: first 10% of the draws against the last 50%; |z| above 2 suggests that the chain has not settled.{p_end}"
+		if `C' > 1 di as text "{p 0 0 2}With `C' chains: ESS is the sum over the chains, Geweke z the value of largest size over the chains, Rhat the Gelman-Rubin potential scale reduction factor (values close to 1, say below 1.1, indicate that the chains agree).{p_end}"
 	}
 	return matrix diag = `R'
 end
@@ -195,4 +216,65 @@ program _nwlsm_predict, rclass
 		di as text "Posterior mean tie probabilities stored as the valued network {bf:`generate'}."
 	}
 	return matrix P = `P'
+end
+
+* estat clusters: posterior membership probabilities and the hard classification (most probable cluster) of the latent cluster model
+capture program drop _nwlsm_clusters
+program _nwlsm_clusters, rclass
+	version 14
+	syntax [, GENerate(string) NOList]
+	if "`e(clusters)'" == "" | "`e(clusters)'" == "0" {
+		di as error "the model was fitted without latent clusters (option clusters())"
+		exit 198
+	}
+	tempname Q CL
+	capture matrix `Q' = e(Q)
+	if _rc {
+		di as error "the membership matrix was not stored (too many actors for a Stata matrix); see LsmSample(""class"")"
+		exit 498
+	}
+	matrix `CL' = e(class)
+	local n = rowsof(`Q')
+	local G = colsof(`Q')
+	local nm : rownames `Q'
+	if `"`generate'"' != "" {
+		if _N != `n' {
+			di as error "{p 0 0 2}generate() needs a data set with one observation per actor in the order of the actors of {bf:`e(network)'}; the data set has `=_N' observations, the network `n' actors.{p_end}"
+			exit 198
+		}
+		confirm new variable `generate'_class
+		forvalues g = 1/`G' {
+			confirm new variable `generate'_p`g'
+		}
+		quietly generate byte `generate'_class = `CL'[_n, 1]
+		forvalues g = 1/`G' {
+			quietly generate double `generate'_p`g' = `Q'[_n, `g']
+		}
+		di as text "Classification stored in {bf:`generate'_class}, probabilities in {bf:`generate'_p1} to {bf:`generate'_p`G'}."
+	}
+	if "`nolist'" == "" {
+		di
+		di as text "Latent clusters: posterior membership probabilities (labels corrected over the draws)"
+		local line = 16 + 8 + 10 * `G'
+		di as text "{hline `line'}"
+		di as text %-16s "Actor" %8s "Class" _c
+		forvalues g = 1/`G' {
+			di as text %10s "P(`g')" _c
+		}
+		di
+		di as text "{hline `line'}"
+		forvalues i = 1/`n' {
+			local lab : word `i' of `nm'
+			if "`lab'" == "" local lab "`i'"
+			di as text %-16s abbrev("`lab'", 15) as result %8.0f `CL'[`i', 1] _c
+			forvalues g = 1/`G' {
+				di as result %10.3f `Q'[`i', `g'] _c
+			}
+			di
+		}
+		di as text "{hline `line'}"
+		di as text "{p 0 0 2}Class: the cluster with the largest posterior probability.{p_end}"
+	}
+	return matrix Q = `Q'
+	return matrix class = `CL'
 end
