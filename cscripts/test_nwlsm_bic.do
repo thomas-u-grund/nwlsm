@@ -95,17 +95,20 @@ program lsmt_bicfit
 end
 lsmt_bicfit bicsamp, edges(sampson_d2) n(18) dir(1) g(0 2 3) seeds(1)
 lsmt_bicfit bicclu45, edges(clu45) n(45) dir(0) g(0 2 3) seeds(5)
-* sender and receiver effects: their MKL estimates are weakly identified; both packages can end in an inferior local optimum (effects of about 0.65 instead of
-* 0.27 standard deviation; latentnet: 3 of 12 seeds, BIC 455 to 602 against 398 to 402). With several MKL starts the best optimum is the usual one and the BIC equals latentnet's typical value.
-foreach s in 2 3 {
-	quietly nwlsm net_bicsamp, dim(2) sender receiver seed(`s') mklstarts(8)
+* sender and receiver effects: their MKL estimates are weakly identified; one start can end in an inferior local optimum (effects of about 0.65 instead of 0.27 standard
+* deviation; latentnet: 3 of 12 seeds, BIC 455 to 602 against 398 to 402). nwlsm uses 4 MKL starts by default with effects, so the BIC is the usual one in every seed.
+forvalues s = 1/8 {
+	quietly nwlsm net_bicsamp, dim(2) sender receiver seed(`s')
+	assert e(mklstarts) == 4
 	quietly estat bic, nolist
-	di as text "sender and receiver, mklstarts(8), seed `s': BIC " %8.2f r(bic) " (latentnet 399.2; typical 397.9 to 402)"
+	di as text "sender and receiver, default starts, seed `s': BIC " %8.2f r(bic) " (latentnet 399.2; typical 397.9 to 402)"
 	if abs(r(bic) - 399.235) > 6 | r(bic_sender) > 12 {
 		di as error "FAIL sender and receiver BIC"
 		global LSM_OK 0
 	}
 }
+quietly nwlsm net_bicsamp, dim(2) seed(1)
+assert e(mklstarts) == 1
 * options of estat bic, results, errors
 quietly nwlsm net_bicclu45, dim(2) clusters(3) seed(5)
 estat bic, effobs(dyads) nolist

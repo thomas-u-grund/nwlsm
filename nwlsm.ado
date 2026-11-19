@@ -22,7 +22,7 @@ program nwlsm, eclass
 	}
 	syntax anything(name=netname) [, Dim(integer 2) EDGEcov(string) ABSdiff(string) NSample(integer 4000) BURNin(integer 10000) ///
 		INTerval(integer 10) SEED(string) PILOT(integer 4) PLEN(integer 500) RANDOMstart SAVEDraws(string) ///
-		SENDER RECEIVER SOCiality SENDERVar(real 1) SENDERDf(real 3) RECEIVERVar(real 1) RECEIVERDf(real 3) SOCIALITYVar(real 1) SOCIALITYDf(real 3) BILinear MKLStarts(integer 1) CHAins(integer 1) THReads(integer 0) CLUsters(integer 0) FAMily(string) TRIals(string) DISPVar(real 1) DISPDf(real 3) ///
+		SENDER RECEIVER SOCiality SENDERVar(real 1) SENDERDf(real 3) RECEIVERVar(real 1) RECEIVERDf(real 3) SOCIALITYVar(real 1) SOCIALITYDf(real 3) BILinear MKLStarts(integer -1) CHAins(integer 1) THReads(integer 0) CLUsters(integer 0) FAMily(string) TRIals(string) DISPVar(real 1) DISPDf(real 3) ///
 		INFluence(string) NEIghbors(integer 0) WEIght(string) OBVar(real 100) OSIGma(numlist min=2 max=2 >0)]
 	if `dim' < 1 | `dim' > 10 {
 		di as error "dim() must be an integer between 1 and 10"
@@ -72,10 +72,12 @@ program nwlsm, eclass
 		di as error "the prior scales and degrees of freedom of the random effects must be positive"
 		error 198
 	}
-	if `mklstarts' < 1 {
+	if `mklstarts' != -1 & `mklstarts' < 1 {
 		di as error "mklstarts() must be at least 1"
 		error 198
 	}
+	* several MKL starts by default when random effects are in the model (their MKL estimates are weakly identified and one start can end in a poor local optimum)
+	if `mklstarts' == -1 local mklstarts = cond("`sender'`receiver'`sociality'" != "", 4, 1)
 	if `chains' < 1 | `chains' > 64 {
 		di as error "chains() must be an integer between 1 and 64"
 		error 198
