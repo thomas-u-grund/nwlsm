@@ -73,6 +73,16 @@ static int thread_start(lsm_thread *t, unsigned (__stdcall *fn)(void *), void *a
 }
 static void thread_join(lsm_thread t) { WaitForSingleObject(t, INFINITE); CloseHandle(t); }
 static int ncores(void) { SYSTEM_INFO si; GetSystemInfo(&si); return si.dwNumberOfProcessors > 0 ? (int)si.dwNumberOfProcessors : 1; }
+typedef CRITICAL_SECTION lsm_mutex;
+typedef CONDITION_VARIABLE lsm_cond;
+static void mutex_init(lsm_mutex *m) { InitializeCriticalSection(m); }
+static void mutex_destroy(lsm_mutex *m) { DeleteCriticalSection(m); }
+static void mutex_lock(lsm_mutex *m) { EnterCriticalSection(m); }
+static void mutex_unlock(lsm_mutex *m) { LeaveCriticalSection(m); }
+static void cond_init(lsm_cond *c) { InitializeConditionVariable(c); }
+static void cond_destroy(lsm_cond *c) { (void)c; }
+static void cond_wait(lsm_cond *c, lsm_mutex *m) { SleepConditionVariableCS(c, m, INFINITE); }
+static void cond_broadcast(lsm_cond *c) { WakeAllConditionVariable(c); }
 #else
 typedef pthread_t lsm_thread;
 #define LSM_THREAD_FN void *
@@ -80,8 +90,19 @@ typedef pthread_t lsm_thread;
 static int thread_start(lsm_thread *t, void *(*fn)(void *), void *arg) { return pthread_create(t, NULL, fn, arg) == 0 ? 0 : -1; }
 static void thread_join(lsm_thread t) { pthread_join(t, NULL); }
 static int ncores(void) { long c = sysconf(_SC_NPROCESSORS_ONLN); return c > 0 ? (int)c : 1; }
+typedef pthread_mutex_t lsm_mutex;
+typedef pthread_cond_t lsm_cond;
+static void mutex_init(lsm_mutex *m) { pthread_mutex_init(m, NULL); }
+static void mutex_destroy(lsm_mutex *m) { pthread_mutex_destroy(m); }
+static void mutex_lock(lsm_mutex *m) { pthread_mutex_lock(m); }
+static void mutex_unlock(lsm_mutex *m) { pthread_mutex_unlock(m); }
+static void cond_init(lsm_cond *c) { pthread_cond_init(c, NULL); }
+static void cond_destroy(lsm_cond *c) { pthread_cond_destroy(c); }
+static void cond_wait(lsm_cond *c, lsm_mutex *m) { pthread_cond_wait(c, m); }
+static void cond_broadcast(lsm_cond *c) { pthread_cond_broadcast(c); }
 #endif
 
+typedef struct Pool Pool;
 typedef struct {
 	int n, dir, nc, K, d, flags, lt, G;
 	int fam; /* 0 Bernoulli, 1 Poisson, 2 binomial, 3 normal */
@@ -91,6 +112,7 @@ typedef struct {
 	int act[3];
 	double scale, df, s2;
 	int mthr; /* threads inside the MKL objective */
+	Pool *mpool; /* their persistent team (one MKL start only), or NULL */
 	double rz, re[3]; /* weak ridge of the MKL fit: precisions of the positions and of the effects */
 	double es[3], edf[3], ev0[3];
 	double *pvar, *beta, *Z, *x, *e0; /* x: nc blocks of n*n; e0: 3 blocks of n */
@@ -195,6 +217,69 @@ static void par_run(int T, int count, void (*fn)(void *, int), void *ctx) {
 	free(jobs); free(th); free(started);
 }
 
+/* Persistent worker team for the passes over all dyads: the T - 1 helper threads are created once (per chain, or for the MKL fit) and sleep between the
+   passes, so that a pass costs a wake-up instead of the creation of threads. Work items are dealt out as in par_run (item k to member k mod T) and are
+   independent, so the result does not depend on the team size. A team is used by one caller at a time. */
+typedef struct { Pool *p; int tid; lsm_thread th; int started; } PMember;
+struct Pool {
+	int T, stop, gen, done, count, nstarted;
+	void (*fn)(void *, int); void *ctx;
+	lsm_mutex mu; lsm_cond cw, cd;
+	PMember *m;
+};
+static LSM_THREAD_FN pool_worker(void *a) {
+	PMember *me = (PMember *)a; Pool *p = me->p; int mygen = 0, k;
+	for (;;) {
+		void (*fn)(void *, int); void *ctx; int count;
+		mutex_lock(&p->mu);
+		while (p->gen == mygen && !p->stop) cond_wait(&p->cw, &p->mu);
+		if (p->stop) { mutex_unlock(&p->mu); break; }
+		mygen = p->gen; fn = p->fn; ctx = p->ctx; count = p->count;
+		mutex_unlock(&p->mu);
+		for (k = me->tid; k < count; k += p->T) fn(ctx, k);
+		mutex_lock(&p->mu);
+		if (++p->done == p->nstarted) cond_broadcast(&p->cd);
+		mutex_unlock(&p->mu);
+	}
+	LSM_THREAD_RET;
+}
+static void pool_destroy(Pool *p) {
+	int k;
+	if (!p) return;
+	mutex_lock(&p->mu); p->stop = 1; cond_broadcast(&p->cw); mutex_unlock(&p->mu);
+	for (k = 1; k < p->T; k++) if (p->m[k].started) thread_join(p->m[k].th);
+	cond_destroy(&p->cw); cond_destroy(&p->cd); mutex_destroy(&p->mu);
+	free(p->m); free(p);
+}
+/* a team of T members (the caller and T - 1 helpers); NULL if T < 2 or on failure (the caller then works alone) */
+static Pool *pool_create(int T) {
+	Pool *p; int k;
+	if (T < 2) return NULL;
+	if (T > 256) T = 256;
+	p = calloc(1, sizeof(Pool));
+	if (!p) return NULL;
+	p->m = calloc(T, sizeof(PMember));
+	if (!p->m) { free(p); return NULL; }
+	p->T = T; mutex_init(&p->mu); cond_init(&p->cw); cond_init(&p->cd);
+	for (k = 1; k < T; k++) { p->m[k].p = p; p->m[k].tid = k; p->m[k].started = (thread_start(&p->m[k].th, pool_worker, &p->m[k]) == 0); }
+	return p;
+}
+/* runs fn(ctx, 0..count-1) on the team; helpers that could not be started do not take part, their items are done by the caller */
+static void pool_run(Pool *p, int count, void (*fn)(void *, int), void *ctx) {
+	int k, ns = 0;
+	for (k = 1; k < p->T; k++) if (p->m[k].started) ns++;
+	mutex_lock(&p->mu);
+	p->fn = fn; p->ctx = ctx; p->count = count; p->done = 0; p->nstarted = ns; p->gen++;
+	cond_broadcast(&p->cw);
+	mutex_unlock(&p->mu);
+	for (k = 0; k < count; k += p->T) fn(ctx, k);
+	for (k = 1; k < p->T; k++) if (!p->m[k].started) { int q; for (q = k; q < count; q += p->T) fn(ctx, q); }
+	mutex_lock(&p->mu);
+	/* the members that failed to start never report: count only the started ones */
+	while (p->done < ns) cond_wait(&p->cd, &p->mu);
+	mutex_unlock(&p->mu);
+}
+
 
 typedef struct {
 	const Model *g;
@@ -206,6 +291,7 @@ typedef struct {
 	double *ob, osig2, *inum, *iden, *ikth, *ires, *ixb, *tnum, *tden, *tres, *sbuf, *dtmp;
 	unsigned char *iset, *tflag;
 	int thr; /* threads for the per-dyad passes of this chain (beta updates) */
+	Pool *pool; /* the team of those threads (persistent), NULL if the pass runs on one thread */
 } State;
 
 static int state_alloc(State *s, const Model *g) {
@@ -226,7 +312,7 @@ static int state_alloc(State *s, const Model *g) {
 	}
 	return 1;
 }
-static void state_free(State *s) { int t; free(s->beta); free(s->Z); for (t = 0; t < 3; t++) free(s->eff[t]); free(s->lin); free(s->D); free(s->L); free(s->tmpD); free(s->tmpL); free(s->tmpL2);
+static void state_free(State *s) { int t; pool_destroy(s->pool); free(s->beta); free(s->Z); for (t = 0; t < 3; t++) free(s->eff[t]); free(s->lin); free(s->D); free(s->L); free(s->tmpD); free(s->tmpL); free(s->tmpL2);
 	free(s->ob); free(s->inum); free(s->iden); free(s->ikth); free(s->ires); free(s->ixb); free(s->tnum); free(s->tden); free(s->tres); free(s->sbuf); free(s->dtmp); free(s->iset); free(s->tflag); }
 
 /* the part of the linear predictor without the latent term */
@@ -476,7 +562,8 @@ static void beta_blk(void *ctx, int b) {
 static void beta_pass(State *s, int k, double delta, double *newL, int commit, double *dll) {
 	BJob J; int b, nb = s->g->n < NBLK ? s->g->n : NBLK;
 	J.s = s; J.k = k; J.delta = delta; J.newL = newL; J.commit = commit; J.nb = nb;
-	if (s->thr > 1) par_run(s->thr, nb, beta_blk, &J);
+	if (s->pool) pool_run(s->pool, nb, beta_blk, &J);
+	else if (s->thr > 1) par_run(s->thr, nb, beta_blk, &J);
 	else for (b = 0; b < nb; b++) beta_blk(&J, b);
 	if (dll) { *dll = 0.0; for (b = 0; b < nb; b++) *dll += J.part[b]; }
 }
@@ -529,7 +616,8 @@ static double mkl_fg(const Model *g, const double *EY, const double *x, double *
 	goff = n * d;
 	if (grad) { for (k = 0; k < P; k++) grad[k] = 0.0; pg = malloc(sizeof(double) * (size_t)P * nb); if (!pg) return -1e300; }
 	J.g = g; J.EY = EY; J.Z = Z; J.beta = beta; J.eff = (const double *const *)eff; J.pf = pf; J.pg = pg; J.P = P; J.goff = goff; J.nb = nb; J.grad = grad != NULL;
-	if (g->mthr > 1) par_run(g->mthr, nb, mkl_blk, &J);
+	if (g->mpool) pool_run(g->mpool, nb, mkl_blk, &J);
+	else if (g->mthr > 1) par_run(g->mthr, nb, mkl_blk, &J);
 	else for (b = 0; b < nb; b++) mkl_blk(&J, b);
 	for (b = 0; b < nb; b++) { f += pf[b]; if (grad) for (k = 0; k < P; k++) grad[k] += pg[(size_t)b * P + k]; }
 	free(pg);
@@ -788,7 +876,7 @@ static void chain_run(void *ctx, int idx) {
 	o->Dsum = calloc((size_t)n * n, sizeof(double)); o->EYsum = calloc((size_t)n * n, sizeof(double));
 	if (!db || !newL || !o->Dsum || !o->EYsum || !state_alloc(&s, gp) || !clu_alloc(&cl, gp)) { o->rc = 909; goto done; }
 	rng_seed(&rg, J->seed);
-	s.thr = cf->ithr; s.disp = g.disp0;
+	s.thr = cf->ithr; s.disp = g.disp0; s.pool = pool_create(s.thr);
 	memcpy(s.beta, g.beta, sizeof(double) * K); memcpy(s.Z, g.Z, sizeof(double) * nd);
 	for (t = 0; t < 3; t++) memcpy(s.eff[t], g.e0 + (long)t * n, sizeof(double) * n);
 	if (J->seed != J->o->seed0) { /* chains after the first start from over-dispersed positions */
@@ -934,7 +1022,7 @@ static int run_chains(const Model *gp, long L) {
 	S = (long)Sc * C;
 	if (T == 0) T = ncores();
 	{ /* threads: the chains first; threads left over (more threads than chains) work inside a chain on the per-dyad passes, if the network is large enough to pay for it */
-	  int act = C < T ? C : T, inner = T / act, cap = (int)(((long)n * n) / 10000);
+	  int act = C < T ? C : T, inner = T / act, cap = (int)(((long)n * n) / 1500);
 	  if (cap < 1) cap = 1;
 	  cf.ithr = inner < cap ? inner : cap; if (cf.ithr > NBLK) cf.ithr = NBLK;
 	}
@@ -972,7 +1060,7 @@ static int run_chains(const Model *gp, long L) {
 		for (dr = 0; dr < S; dr++) { g.dispm += pDisp[dr] / (double)S; for (k = 0; k < ng; k++) ms2 += pS2[dr * ng + k] / ((double)S * ng); for (t = 0; t < 3; t++) mev[t] += pEv[dr * 3 + t] / (double)S; }
 		g.dispm -= g.disp0; gm = g; /* dispm: posterior mean of the dispersion (the objective of the normal family is scaled by it) */
 		/* a very weak ridge (1/1000 of the posterior precision) keeps the optimiser from running away along flat directions */
-		gm.mthr = 1; gm.rz = 1e-3 / ms2; for (t = 0; t < 3; t++) gm.re[t] = g.act[t] ? 1e-3 / mev[t] : 0.0;
+		gm.mthr = 1; gm.mpool = NULL; gm.rz = 1e-3 / ms2; for (t = 0; t < 3; t++) gm.re[t] = g.act[t] ? 1e-3 / mev[t] : 0.0;
 		kls = malloc(sizeof(double) * S);
 		if (!kls) { SF_error("lsm_sim: not enough memory\n"); rc = 909; goto cleanup; }
 		nblk = S < 64 ? (int)S : 64;
@@ -990,7 +1078,9 @@ static int run_chains(const Model *gp, long L) {
 		mj.gm = &gm; mj.EY = EY; mj.dBeta = pBeta; mj.dE = pE; mj.dZ = pZ; mj.sel = sel; mj.xs = xs; mj.fo = fo; mj.its = its; mj.S = (int)S;
 		{ int inner = T / (ms < T ? ms : T), cap = (int)(((long)n * n) / 10000);
 		  if (cap < 1) cap = 1; gm.mthr = inner < cap ? inner : cap; if (gm.mthr > NBLK) gm.mthr = NBLK; }
+		if (ms == 1 && gm.mthr > 1) gm.mpool = pool_create(gm.mthr);
 		par_run(T, ms, mkl_start, &mj);
+		pool_destroy(gm.mpool); gm.mpool = NULL;
 		{ int have = 0, cbest = 0;
 		  for (c = 0; c < ms; c++) if (!have || fo[c] > fbest) { have = 1; fbest = fo[c]; itbest = its[c]; cbest = c; bi = sel[c]; }
 		  fbest = mkl_fg(&g, EY, xs + (size_t)cbest * P, NULL, P);

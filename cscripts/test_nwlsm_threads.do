@@ -26,6 +26,15 @@ program lsmt_same
 	}
 	di as result "PASS `case'"
 end
+mata:
+void lsmt_tie(real matrix A, real matrix Zt, real scalar i, real scalar j)
+{
+	if (runiform(1, 1) < invlogit(1 - sqrt(sum((Zt[i, .] - Zt[j, .]) :^ 2)))) {
+		A[i, j] = 1
+		A[j, i] = 1
+	}
+}
+end
 lsmt_mknet net40, edges("$LSM_REPO/dev/ref/random40_d2_edges.csv") n(40) dir(0)
 lsmt_same chains, net(net40) opts(dim(2) seed(5) nsample(300) burnin(500) chains(3)) t1(1) t2(2)
 lsmt_same chains5, net(net40) opts(dim(2) seed(5) nsample(300) burnin(500) chains(3)) t1(1) t2(5)
@@ -42,6 +51,26 @@ forvalues j = 1/200 {
 mata: n = 200; Z = rnormal(n, 2, 0, 1); eta = -0.3 :+ rnormal(n, 1, 0, .6) :+ rnormal(1, n, 0, .6) :- lsmt_pd(Z); A = (runiform(n, n) :< invlogit(eta)); _diag(A, 0); st_store(., ., A); st_matrix("XC", rnormal(n, n, 0, 1))
 nwset __a*, name(big) directed
 lsmt_same inner, net(big) opts(dim(2) seed(8) nsample(40) burnin(100) pilot(2) plen(50) sender receiver edgecov(XC)) t1(1) t2(4)
+* the persistent worker team of the per-dyad passes (networks of about 40 actors and more): n = 100, threads 1, 2, 4 and 8, and the same numbers as the version
+* without a team (0.6.0: the fixed seed 7 on this network gave the checksum below)
+clear
+set obs 100
+set seed 12345
+forvalues j = 1/100 {
+	quietly gen double a`j' = .
+}
+mata: n = 100; Zt = rnormal(n, 2, 0, 1.5); A = J(n, n, 0); for (i = 1; i <= n; i++) for (j = i + 1; j <= n; j++) lsmt_tie(A, Zt, i, j); st_store(., ., A)
+nwset a*, name(pool100) undirected
+scalar ref = .
+foreach th in 1 2 4 8 {
+	quietly nwlsm pool100, dim(2) seed(7) nsample(1000) burnin(2000) threads(`th')
+	mata: st_numscalar("h", sum(st_matrix("e(Z)") :* (1::rows(st_matrix("e(Z)")))) + 1000 * sum(st_matrix("e(b)")) + 1e6 * sum(st_matrix("e(summary)")))
+	di as text "pool100 threads `th': checksum " %20.9f scalar(h)
+	if scalar(ref) == . scalar ref = scalar(h)
+	assert scalar(h) == scalar(ref)
+}
+assert abs(scalar(ref) - 3710932.303690526) < 1e-6
+di as result "PASS pool100"
 * errors
 capture nwlsm big, threads(-1)
 assert _rc == 198
