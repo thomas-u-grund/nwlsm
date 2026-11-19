@@ -57,11 +57,21 @@ void lsmt_edges(real scalar n, real scalar dir)
 	st_matrix("__lsmt_A", A)
 }
 
-// full log likelihood of the model (euclidean distance), by direct computation
-real scalar lsmt_ll(real matrix y, real scalar dir, real matrix X, real rowvector beta, real matrix Z)
+// matrix of the Euclidean distances between the rows of Z
+real matrix lsmt_pd(real matrix Z)
 {
-	real scalar n, k, i, j, eta, t
 	real matrix D
+	real scalar n, i, j
+
+	n = rows(Z)
+	D = J(n, n, 0)
+	for (i = 1; i <= n; i++) for (j = 1; j <= n; j++) D[i, j] = sqrt(sum((Z[i, .] - Z[j, .]) :^ 2))
+	return(D)
+}
+// full log likelihood of the model by direct computation. E: n x 3 effects (sender, receiver, sociality), opt: (sender, receiver, sociality, bilinear, ...)
+real scalar lsmt_ll(real matrix y, real scalar dir, real matrix X, real rowvector beta, real matrix Z, real matrix E, real rowvector opt)
+{
+	real scalar n, k, i, j, eta, t, lt
 
 	n = rows(y)
 	t = 0
@@ -70,7 +80,12 @@ real scalar lsmt_ll(real matrix y, real scalar dir, real matrix X, real rowvecto
 		if (y[i, j] >= .) continue
 		eta = beta[1]
 		for (k = 1; k <= rows(X) / n; k++) eta = eta + beta[k + 1] * X[(k - 1) * n + i, j]
-		eta = eta - sqrt(sum((Z[i, .] - Z[j, .]) :^ 2))
+		if (opt[1]) eta = eta + E[i, 1]
+		if (opt[2]) eta = eta + E[j, 2]
+		if (opt[3]) eta = eta + E[i, 3] + E[j, 3]
+		if (opt[4]) lt = -sum(Z[i, .] :* Z[j, .])
+		else lt = sqrt(sum((Z[i, .] - Z[j, .]) :^ 2))
+		eta = eta - lt
 		t = t + y[i, j] * eta - ln(1 + exp(eta))
 	}
 	return(t)

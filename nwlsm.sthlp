@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 0.2.0  19nov2026 author: Thomas Grund}{...}
+{* *! version 0.3.0  19nov2026 author: Thomas Grund}{...}
 {title:Title}
 
 {p2colset 9 17 24 2}{...}
@@ -108,4 +108,4 @@ The full posterior sample stays in Mata after the fit: {cmd:mata: LsmSample("bet
 {p 4 8 2}Krivitsky, P. N. and Handcock, M. S. 2008. Fitting position latent cluster models for social networks with latentnet. Journal of Statistical Software 24(5).{p_end}
 
 {hline}
-{pstd}{it:nwlsm version 0.2.0, 19 November 2026}{p_end}{* nwversion}
+{pstd}{it:nwlsm version 0.3.0, 19 November 2026}{p_end}{* nwversion}

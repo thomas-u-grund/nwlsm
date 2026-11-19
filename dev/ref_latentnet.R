@@ -25,3 +25,71 @@ write.csv(data.frame(x = x), file.path(out, "random40_x.csv"), row.names = FALSE
 pp <- do.call(rbind, lapply(list(c(20, 2), c(40, 2), c(40, 3), c(80, 2)), function(a) { nn <- a[1]; dd <- a[2]; g <- network(matrix(rbinom(nn * nn, 1, .2), nn, nn), directed = TRUE)
   f <- ergmm(g ~ euclidean(d = dd), control = ergmm.control(burnin = 200, sample.size = 50, interval = 2)); data.frame(n = nn, d = dd, Z.var = f$prior$Z.var, Z.var.df = f$prior$Z.var.df, Z.mean.var = f$prior$Z.mean.var) }))
 write.csv(pp, file.path(out, "prior_formulas.csv"), row.names = FALSE); print(pp)
+
+# ---- Milestone 2 fixtures (nwlsm 0.3.0): sender / receiver / sociality effects, minimum-KL positions, bilinear distance ----
+# Two chains per case (seeds s and s + 1; the second chain gives a Monte Carlo error for the reference, files *_c2_*).
+save_fit2 <- function(name, f, net, X = NULL) {
+  save_fit(name, f, net)
+  b <- f$sample$beta
+  v <- data.frame(name = character(0), mean = numeric(0), sd = numeric(0))
+  add <- function(nm, x) v <<- rbind(v, data.frame(name = nm, mean = mean(x), sd = sd(x)))
+  add("Z.var", f$sample$Z.var)
+  if (!is.null(f$sample$sender.var)) add("sender.var", f$sample$sender.var)
+  if (!is.null(f$sample$receiver.var)) add("receiver.var", f$sample$receiver.var)
+  if (!is.null(f$sample$sociality.var)) add("sociality.var", f$sample$sociality.var)
+  write.csv(v, file.path(out, paste0(name, "_vars.csv")), row.names = FALSE)
+  eff <- list()
+  for (e in c("sender", "receiver", "sociality")) if (!is.null(f$sample[[e]])) eff[[e]] <- colMeans(f$sample[[e]])
+  if (length(eff)) write.csv(as.data.frame(eff), file.path(out, paste0(name, "_effects.csv")), row.names = FALSE)
+  if (!is.null(f$mkl$beta)) write.csv(data.frame(beta = f$mkl$beta), file.path(out, paste0(name, "_mklbeta.csv")), row.names = FALSE)
+  # posterior mean tie probabilities
+  n <- network.size(net); ns <- dim(f$sample$Z)[1]; P <- matrix(0, n, n)
+  for (s in seq_len(ns)) {
+    th <- list(Z = f$sample$Z[s, , ], beta = f$sample$beta[s, ])
+    for (e in c("sender", "receiver", "sociality")) if (!is.null(f$sample[[e]])) th[[e]] <- f$sample[[e]][s, ]
+    P <- P + plogis(latentnet:::ergmm.eta(f$model, th))
+  }
+  write.csv(P / ns, file.path(out, paste0(name, "_P.csv")), row.names = FALSE)
+}
+save_chain2 <- function(name, f) {
+  Z <- f$sample$Z; ns <- dim(Z)[1]; n <- dim(Z)[2]
+  D <- matrix(0, n, n); for (s in seq_len(ns)) D <- D + as.matrix(dist(Z[s, , ])); D <- D / ns
+  write.csv(D, file.path(out, paste0(name, "_c2_meandist.csv")), row.names = FALSE)
+  b <- f$sample$beta; write.csv(data.frame(mean = colMeans(b), sd = apply(b, 2, sd)), file.path(out, paste0(name, "_c2_beta.csv")))
+  write.csv(data.frame(llk_mean = mean(f$sample$lpY), llk_sd = sd(f$sample$lpY)), file.path(out, paste0(name, "_c2_llk.csv")), row.names = FALSE)
+  v <- data.frame(name = character(0), mean = numeric(0), sd = numeric(0))
+  add <- function(nm, x) v <<- rbind(v, data.frame(name = nm, mean = mean(x), sd = sd(x)))
+  add("Z.var", f$sample$Z.var)
+  if (!is.null(f$sample$sender.var)) add("sender.var", f$sample$sender.var)
+  if (!is.null(f$sample$receiver.var)) add("receiver.var", f$sample$receiver.var)
+  if (!is.null(f$sample$sociality.var)) add("sociality.var", f$sample$sociality.var)
+  write.csv(v, file.path(out, paste0(name, "_c2_vars.csv")), row.names = FALSE)
+}
+two_chains <- function(name, formula_str, net, seed) {
+  set.seed(seed); f <- ergmm(as.formula(formula_str), control = ctl); save_fit2(name, f, net)
+  set.seed(seed + 1); f2 <- ergmm(as.formula(formula_str), control = ctl); save_chain2(name, f2)
+  invisible(f)
+}
+# (a) Sampson monks (directed) with sender and receiver effects
+data(sampson)
+two_chains("sampson_sr", "samplike ~ euclidean(d = 2) + rsender + rreceiver", samplike, 11)
+# (b) undirected network with sociality: n = 40, d = 2, absdiff covariate
+set.seed(21); n <- 40; z <- matrix(rnorm(n * 2), n, 2); x <- rnorm(n); so <- rnorm(n, 0, 0.8)
+eta <- 0.3 + outer(so, so, "+") + 0.5 * abs(outer(x, x, "-")) - as.matrix(dist(z))
+A <- matrix(rbinom(n * n, 1, plogis(eta)), n, n); A[lower.tri(A, TRUE)] <- 0; A <- A + t(A)
+netb <- network(A, directed = FALSE); set.vertex.attribute(netb, "x", x)
+write.csv(data.frame(x = x), file.path(out, "soc40_x.csv"), row.names = FALSE)
+two_chains("soc40", 'netb ~ euclidean(d = 2) + rsociality + absdiff("x")', netb, 31)
+# (c) directed network with sender and receiver effects: n = 40, d = 2
+set.seed(22); n <- 40; z <- matrix(rnorm(n * 2), n, 2); x <- rnorm(n); se <- rnorm(n, 0, 0.8); re <- rnorm(n, 0, 0.6)
+eta <- -0.2 + outer(se, re, "+") + 0.5 * abs(outer(x, x, "-")) - as.matrix(dist(z))
+A <- matrix(rbinom(n * n, 1, plogis(eta)), n, n); diag(A) <- 0
+netc <- network(A, directed = TRUE); set.vertex.attribute(netc, "x", x)
+write.csv(data.frame(x = x), file.path(out, "sr40_x.csv"), row.names = FALSE)
+two_chains("sr40", 'netc ~ euclidean(d = 2) + rsender + rreceiver + absdiff("x")', netc, 41)
+# (d) sociality in a directed network (Sampson), and sociality-free bilinear model on an undirected network
+two_chains("sampson_soc", "samplike ~ euclidean(d = 2) + rsociality", samplike, 51)
+set.seed(23); n <- 40; z <- matrix(rnorm(n * 2, 0, 1), n, 2)
+eta <- 0.2 + z %*% t(z) * 0.5; A <- matrix(rbinom(n * n, 1, plogis(eta)), n, n); A[lower.tri(A, TRUE)] <- 0; A <- A + t(A)
+netd <- network(A, directed = FALSE)
+two_chains("bil40", "netd ~ bilinear(d = 2)", netd, 61)

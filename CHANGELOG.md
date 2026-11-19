@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.3.0] - 2026-11-19
+- (draft)
+
 ## [0.2.0] - 2026-11-19
 - First estimation command: `nwlsm netname, dim() edgecov() absdiff() nsample() burnin() interval() seed()` fits the Euclidean latent space model of latentnet (binary one-mode networks, undirected and directed) by MCMC in the native plugin `lsm_sim` (random-walk Metropolis-Hastings for the positions, one actor at a time, and for the coefficients; Gibbs update of the position variance; latentnet's default priors including the covariate-adjusted coefficient variance; step sizes tuned in pilot runs toward an acceptance rate of 0.234). Replay, `e()` results, posterior mean distance matrix `e(D)`, Procrustes-aligned mean positions `e(Z)`, `savedraws()`.
 - Minimum Kullback-Leibler (MKL) positions of latentnet are NOT implemented yet; positions are the mean of the Procrustes-aligned draws.

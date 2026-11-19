@@ -1,4 +1,4 @@
-*! version 0.2.0  19nov2026 nwlsm
+*! version 0.3.0  19nov2026 nwlsm
 * Copyright (C) 2026 Thomas U. Grund
 * This file is part of nwlsm, a Stata package for latent space models for networks. It follows the latent space model of
 * Hoff, Raftery and Handcock (2002) as implemented in the R package latentnet (Krivitsky and Handcock) and is written independently.
@@ -21,13 +21,22 @@ program nwlsm, eclass
 		exit
 	}
 	syntax anything(name=netname) [, Dim(integer 2) EDGEcov(string) ABSdiff(string) NSample(integer 4000) BURNin(integer 10000) ///
-		INTerval(integer 10) SEED(string) PILOT(integer 4) PLEN(integer 500) RANDOMstart SAVEDraws(string)]
+		INTerval(integer 10) SEED(string) PILOT(integer 4) PLEN(integer 500) RANDOMstart SAVEDraws(string) ///
+		SENDER RECEIVER SOCiality SENDERVar(real 1) SENDERDf(real 3) RECEIVERVar(real 1) RECEIVERDf(real 3) SOCIALITYVar(real 1) SOCIALITYDf(real 3) BILinear MKLStarts(integer 5)]
 	if `dim' < 1 | `dim' > 10 {
 		di as error "dim() must be an integer between 1 and 10"
 		error 198
 	}
 	if `nsample' < 10 | `burnin' < 0 | `interval' < 1 | `pilot' < 0 | `plen' < 10 {
 		di as error "{p 0 0 2}nsample() must be at least 10, burnin() not negative, interval() at least 1, pilot() not negative and plen() at least 10.{p_end}"
+		error 198
+	}
+	if `sendervar' <= 0 | `receivervar' <= 0 | `socialityvar' <= 0 | `senderdf' <= 0 | `receiverdf' <= 0 | `socialitydf' <= 0 {
+		di as error "the prior scales and degrees of freedom of the random effects must be positive"
+		error 198
+	}
+	if `mklstarts' < 1 {
+		di as error "mklstarts() must be at least 1"
 		error 198
 	}
 	if `"`seed'"' != "" {
@@ -53,6 +62,15 @@ program nwlsm, eclass
 		error 198
 	}
 	local __dir = ("`directed'" == "true")
+	if !`__dir' & ("`sender'" != "" | "`receiver'" != "") {
+		di as error "{p 0 0 2}sender and receiver effects need a directed network; use {bf:sociality} for the undirected network {bf:`netname'}.{p_end}"
+		error 198
+	}
+	if "`sociality'" != "" & ("`sender'" != "" | "`receiver'" != "") & !`__dir' {
+		di as error "sociality cannot be combined with sender or receiver effects in an undirected network"
+		error 198
+	}
+	local __opt "`=("`sender'" != "")' `=("`receiver'" != "")' `=("`sociality'" != "")' `=("`bilinear'" != "")' `sendervar' `senderdf' `receivervar' `receiverdf' `socialityvar' `socialitydf' `mklstarts'"
 	capture mata: mata drop __nwlsm_y __nwlsm_X
 	mata: __nwlsm_y = lsm_ymat(*(`netobj'->get_matrix()))
 	mata: __nwlsm_X = J(0, `nodes', .)
@@ -127,9 +145,9 @@ program nwlsm, eclass
 	}
 	if `"`seed'"' == "" local __seed = floor(runiform() * 2147483646) + 1
 	else local __seed = `seed'
-	tempname B V T D Z ACC
+	tempname B V T D Z ACC PP MB ZM ME VT ES ER EO
 	capture noisily mata: LsmFit(__nwlsm_y, `__dir', __nwlsm_X, `dim', `nsample', `burnin', `interval', `__seed', `pilot', `plen', ///
-		`=("`randomstart'" != "")', "`B'", "`V'", "`T'", "`D'", "`Z'", "`ACC'")
+		`=("`randomstart'" != "")', strtoreal(tokens("`__opt'")), ("`B'", "`V'", "`T'", "`D'", "`Z'", "`ACC'", "`PP'", "`MB'", "`ZM'", "`ME'", "`VT'", "`ES'", "`ER'", "`EO'"))
 	local __rc = _rc
 	mata: st_local("__ny", strofreal(sum((__nwlsm_y :< .) :& (__nwlsm_y :!= .)) - sum(diagonal(__nwlsm_y) :< .)))
 	capture mata: mata drop __nwlsm_y __nwlsm_X
@@ -140,17 +158,29 @@ program nwlsm, eclass
 	matrix colnames `V' = `__names'
 	matrix rownames `T' = `__names'
 	matrix colnames `T' = mean sd mcse lower95 upper95
-	local __ac `__names' 
-	matrix colnames `ACC' = latent `__names'
+	local __effs
+	if "`sender'" != "" local __effs `__effs' sender
+	if "`receiver'" != "" local __effs `__effs' receiver
+	if "`sociality'" != "" local __effs `__effs' sociality
+	matrix colnames `ACC' = latent `__names' sender receiver sociality
 	matrix rownames `ACC' = acceptance stepsize
+	local __vn sigma2
+	foreach __e of local __effs {
+		local __vn `__vn' `__e'_var
+	}
+	matrix rownames `VT' = `__vn'
+	matrix colnames `VT' = mean sd mcse lower95 upper95
 	ereturn post `B' `V', obs(`__ny')
 	ereturn local cmd "nwlsm"
-	ereturn local version "0.2.0"
-	ereturn local title "Latent space model (Euclidean distance), posterior by MCMC"
+	ereturn local version "0.3.0"
+	ereturn local estat_cmd "nwlsm_estat"
+	ereturn local title "Latent space model (`=cond("`bilinear'" != "", "bilinear", "Euclidean distance")'), posterior by MCMC"
+	ereturn local latent = cond("`bilinear'" != "", "bilinear", "euclidean")
+	ereturn local effects "`__effs'"
 	ereturn local network "`netname'"
 	ereturn local directed = cond(`__dir', "directed", "undirected")
 	ereturn local covariates "`__names'"
-	ereturn local positions "mean of the Procrustes-aligned draws"
+	ereturn local positions "minimum Kullback-Leibler (MKL) positions"
 	ereturn local start = cond("`randomstart'" != "", "random", "classical scaling of the geodesic distances")
 	ereturn scalar N_nodes = `nodes'
 	ereturn scalar dim = `dim'
@@ -158,6 +188,7 @@ program nwlsm, eclass
 	ereturn scalar burnin = `burnin'
 	ereturn scalar interval = `interval'
 	ereturn scalar seed = `__seed'
+	ereturn scalar mklstarts = `mklstarts'
 	ereturn scalar pilot = `pilot'
 	ereturn scalar plen = `plen'
 	ereturn scalar ll_mean = `__llk'
@@ -166,17 +197,60 @@ program nwlsm, eclass
 	ereturn scalar sigma2_sd = `__s2sd'
 	ereturn scalar prior_scale = `__priorscale'
 	ereturn scalar prior_df = `__priordf'
+	ereturn scalar mkl_start = `__mklstart'
+	ereturn scalar mkl_iter = `__mkliter'
+	ereturn scalar mkl_obj = `__mklobj'
 	ereturn matrix summary = `T'
+	ereturn matrix vsummary = `VT'
 	ereturn matrix tuning = `ACC'
+	matrix colnames `MB' = `__names'
+	matrix rownames `MB' = mkl
+	ereturn matrix mkl_b = `MB'
 	if `__matok' {
-		matrix colnames `Z' = dim1-dim`dim'
+		local __dn
+		forvalues __j = 1/`dim' {
+			local __dn `__dn' dim`__j'
+		}
+		matrix colnames `Z' = `__dn'
+		matrix colnames `ZM' = `__dn'
+		if `"`labs'"' != "" {
+			foreach __m in Z ZM ME ES ER EO {
+				capture matrix rownames ``__m'' = `labs'
+			}
+		}
+		capture matrix rownames `PP' = `labs'
+		capture matrix colnames `PP' = `labs'
+		capture matrix rownames `D' = `labs'
+		capture matrix colnames `D' = `labs'
 		ereturn matrix D = `D'
 		ereturn matrix Z = `Z'
+		ereturn matrix Zmean = `ZM'
+		ereturn matrix P = `PP'
+		local __k 0
+		foreach __e in sender receiver sociality {
+			local ++__k
+			if `: list __e in __effs' {
+				if "`__e'" == "sender" {
+					matrix colnames `ES' = mean sd
+					ereturn matrix sender = `ES'
+				}
+				if "`__e'" == "receiver" {
+					matrix colnames `ER' = mean sd
+					ereturn matrix receiver = `ER'
+				}
+				if "`__e'" == "sociality" {
+					matrix colnames `EO' = mean sd
+					ereturn matrix sociality = `EO'
+				}
+			}
+		}
+		matrix colnames `ME' = sender receiver sociality
+		ereturn matrix mkl_effects = `ME'
 	}
 	if `"`savedraws'"' != "" {
 		preserve
 		clear
-		mata: LsmSaveDraws(tokens("`__names'"))
+		mata: LsmSaveDraws(tokens("`__names'"), strtoreal(tokens("`=("`sender'" != "")' `=("`receiver'" != "")' `=("`sociality'" != "")'")))
 		qui rename _cons beta_cons
 		save `"`savedraws'"', replace
 		restore
@@ -203,9 +277,18 @@ program _nwlsm_display
 		di as text %-24s abbrev("`c'", 23) _col(25) as result %10.4f `T'[`k', 1] %10.4f `T'[`k', 2] %10.4f `T'[`k', 3] %11.4f `T'[`k', 4] %10.4f `T'[`k', 5]
 	}
 	di as text "{hline 78}"
-	di as text "Variance of the latent positions (sigma2), posterior mean: " as result %7.3f e(sigma2_mean)
+	di as text "Variance parameters (posterior):"
+	tempname VT
+	matrix `VT' = e(vsummary)
+	local vnm : rownames `VT'
+	local k 0
+	foreach c of local vnm {
+		local ++k
+		di as text %-24s "`c'" _col(25) as result %10.4f `VT'[`k', 1] %10.4f `VT'[`k', 2] %10.4f `VT'[`k', 3] %11.4f `VT'[`k', 4] %10.4f `VT'[`k', 5]
+	}
+	di as text "{hline 78}"
 	tempname A
 	matrix `A' = e(tuning)
 	di as text "Acceptance rate of the latent positions: " as result %5.3f `A'[1, 1]
-	di as text "{p 0 0 2}Posterior mean distances: {bf:e(D)}; mean positions (aligned by Procrustes rotation): {bf:e(Z)}. Positions are identified up to rotation, reflection and translation.{p_end}"
+	di as text "{p 0 0 2}Positions: minimum Kullback-Leibler estimate {bf:e(Z)} (also {bf:estat positions}); mean of the draws aligned to it {bf:e(Zmean)}; posterior mean distances {bf:e(D)}; posterior mean tie probabilities {bf:e(P)}. Positions are identified up to rotation, reflection and translation only.{p_end}"
 end

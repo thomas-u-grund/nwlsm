@@ -32,6 +32,14 @@ capture mata: mata drop LsmFit()
 capture mata: mata drop LsmCheck()
 capture mata: mata drop LsmSample()
 capture mata: mata drop LsmSaveDraws()
+capture mata: mata drop lsm_ess()
+capture mata: mata drop lsm_geweke()
+capture mata: mata drop LsmDiag()
+capture mata: mata drop lsm_vartable()
+capture mata: mata drop LsmCheckMKL()
+capture mata: mata drop lsm_ztrans()
+capture mata: mata drop LsmPlotPrep()
+capture mata: mata drop LsmPlotStore()
 
 mata:
 mata set matastrict off
@@ -72,7 +80,7 @@ real scalar LsmNativeAvailable()
 	return(fileexists(p))
 }
 
-real scalar LSM_PROTOCOL_NEEDED() return(1)
+real scalar LSM_PROTOCOL_NEEDED() return(2)
 
 class LsmNat {
 	real scalar isopen, L
@@ -126,18 +134,18 @@ void LsmNat::close()
 }
 
 // y: n x n (0/1, missing = .), X: (nc*n) x n, the covariate matrices stacked, d: dimension, prior: (scale, df, s2 start),
-// pvar, b0: 1 x K, Z0: n x d
+// pvar, b0: 1 x K, Z0: n x d, flags: (sender, receiver, sociality, bilinear), eprior: 3 x 3 (scale, df, start variance of the effects),
+// E0: n x 3 start values of the effects
 void LsmNat::setup(real matrix y, real scalar directed, real matrix X, real scalar d, real rowvector prior,
-		real rowvector pvar, real rowvector b0, real matrix Z0)
+		real rowvector pvar, real rowvector b0, real matrix Z0, real rowvector flags, real matrix eprior, real matrix E0)
 {
-	real scalar n, nc
+	real scalar n, nc, k
 	real colvector blob
 
 	n = rows(y)
 	nc = rows(X) / n
-	blob = (LSM_PROTOCOL_NEEDED() \ n \ directed \ nc \ d \ J(11, 1, 0)) \ prior' \ pvar' \ b0' \ vec(Z0') \ vec(editmissing(y, -1)') 
+	blob = (LSM_PROTOCOL_NEEDED() \ n \ directed \ nc \ d \ (flags[1] + 2 * flags[2] + 4 * flags[3]) \ flags[4] \ J(9, 1, 0)) \ prior' \ pvar' \ b0' \ vec(Z0') \ vec(eprior') \ vec(E0) \ vec(editmissing(y, -1)')
 	if (nc > 0) {
-		real scalar k
 		for (k = 1; k <= nc; k++) blob = blob \ vec(editmissing(X[((k - 1) * n + 1)..(k * n), .], 0)')
 	}
 	L = rows(blob)
@@ -196,7 +204,7 @@ real matrix lsm_mds(real matrix D, real scalar d)
 
 // start values: positions (n x d) and coefficients (1 x K) of a logit with the MDS distance as offset
 void lsm_start(real matrix y, real scalar dir, real matrix X, real scalar d, real scalar random, real scalar seed,
-	real matrix Z0, real rowvector b0)
+	real matrix Z0, real rowvector b0, real scalar bil)
 {
 	real scalar n, nc, k, it, m, i, j
 	real matrix Dm, M, XX, S
@@ -229,7 +237,11 @@ void lsm_start(real matrix y, real scalar dir, real matrix X, real scalar d, rea
 	for (k = 1; k <= nc; k++) XX = XX, vec(X[((k - 1) * n + 1)..(k * n), .])[r]
 	Dm = J(n, n, 0)
 	for (k = 1; k <= d; k++) Dm = Dm + (Z0[., k] * J(1, n, 1) - J(n, 1, 1) * Z0[., k]') :^ 2
-	off = -vec(sqrt(Dm))[r]
+	if (bil) {
+		Dm = Z0 * Z0'
+		off = vec(Dm)[r]
+	}
+	else off = -vec(sqrt(Dm))[r]
 	bb = J(nc + 1, 1, 0)
 	for (it = 1; it <= 30; it++) {
 		p = 1 :/ (1 :+ exp(-(XX * bb + off)))
@@ -306,47 +318,185 @@ real matrix lsm_node_covs(string scalar var, real scalar n)
 	return(abs(v * J(1, n, 1) - J(n, 1, 1) * v'))
 }
 
+// effective sample size of a series (Geyer's initial monotone positive sequence)
+real scalar lsm_ess(real colvector x)
+{
+	real scalar S, m, k, g0, gam, prev, sumg, G
+	real colvector xc
+
+	S = rows(x)
+	xc = x :- mean(x)
+	g0 = cross(xc, xc) / S
+	if (g0 <= 0) return(S)
+	sumg = 0
+	prev = .
+	for (k = 0; k < S - 2; k = k + 2) {
+		G = (cross(xc[1..(S - k)], xc[(k + 1)..S]) + cross(xc[1..(S - k - 1)], xc[(k + 2)..S])) / S
+		if (G <= 0) break
+		if (prev < . & G > prev) G = prev
+		prev = G
+		sumg = sumg + G
+	}
+	// sum over pairs from lag 0: tau = -g0 + 2 sum_m (g_2m + g_2m+1)
+	gam = (-g0 + 2 * sumg) / g0
+	if (gam < 1 / S) gam = 1 / S
+	return(min((S, S / gam)))
+}
+
+// Geweke z-score: first 10% of the series against the last 50%; the variance of each mean uses the effective sample size of its segment
+real scalar lsm_geweke(real colvector x)
+{
+	real scalar S, na, nb, va, vb
+	real colvector a, b
+
+	S = rows(x)
+	na = max((2, floor(0.1 * S)))
+	nb = max((2, floor(0.5 * S)))
+	a = x[1..na]
+	b = x[(S - nb + 1)..S]
+	va = variance(a) / lsm_ess(a)
+	vb = variance(b) / lsm_ess(b)
+	if (va + vb <= 0) return(0)
+	return((mean(a) - mean(b)) / sqrt(va + vb))
+}
+
+// diagnostics of the columns of a draws matrix: (ESS, Geweke z, mean, sd) per column
+real matrix LsmDiag(real matrix x)
+{
+	real scalar k
+	real matrix R
+
+	R = J(cols(x), 4, .)
+	for (k = 1; k <= cols(x); k++) {
+		R[k, 1] = lsm_ess(x[., k])
+		R[k, 2] = lsm_geweke(x[., k])
+		R[k, 3] = mean(x[., k])
+		R[k, 4] = sqrt(variance(x[., k]))
+	}
+	return(R)
+}
+
+// summary of a variance parameter: mean, sd, mcse, 2.5%, 97.5%
+real rowvector lsm_vartable(real colvector v)
+{
+	real colvector srt
+	real scalar S
+
+	S = rows(v)
+	srt = sort(v, 1)
+	return((mean(v), sqrt(variance(v)), lsm_mcse(v), srt[max((1, ceil(0.025 * S)))], srt[min((S, floor(0.975 * S) + 1))]))
+}
+
+// centre the positions and rotate them to their principal axes (a rigid motion; positions are identified up to such motions only)
+real matrix lsm_ztrans(real matrix Z, real scalar bil)
+{
+	real matrix Zc, V, U, Vt
+	real rowvector sv
+
+	// the bilinear model is not invariant to translations: positions are only rotated or reflected there
+	Zc = bil ? Z : Z :- mean(Z)
+	if (cols(Zc) > 1) {
+		svd(Zc, U, sv, Vt)
+		Zc = Zc * Vt'
+	}
+	return(Zc)
+}
+
 /*
-	LsmFit: runs the chain and stores the summary. Posterior sample stays in the Mata externals __nwlsm_beta (S x K), __nwlsm_llk,
-	__nwlsm_s2 (S x 1), __nwlsm_Z (S x n d, by actor then dimension) and __nwlsm_D (the mean distance matrix).
-	Results into Stata matrices: B (1 x K means), V (K x K covariance), T (K x 5: mean, sd, mcse, 2.5%, 97.5%), D (n x n, if it fits),
-	Z (n x d aligned mean positions, if it fits), ACC (1 x (K+1) acceptance rates, step sizes below it).
+	LsmFit: runs the chain and stores the summary. The posterior sample stays in the Mata externals __nwlsm_beta (S x K), __nwlsm_llk,
+	__nwlsm_s2 (S x 1), __nwlsm_ev (S x 3: variances of the sender, receiver and sociality effects), __nwlsm_Z (S x n d, by actor then
+	dimension), __nwlsm_E (S x 3 n: the effects, by type then actor), __nwlsm_D (mean latent term) and __nwlsm_P (mean tie probabilities).
+	opt = (sender, receiver, sociality, bilinear, var_s, df_s, var_r, df_r, var_o, df_o, mklstarts); nm = the names of the Stata matrices to fill:
+	B V T D MKLZ A P MB ZM ME VT ES ER EO (means of the draws, covariance, coefficient table, mean distances, MKL positions, tuning,
+	variance table, effects (n x 2: mean, sd), mean tie probabilities, MKL coefficients, mean of aligned draws, MKL effects).
+	The order of nm: B V T D MKLZ ACC P MB ZM ME VT ES ER EO.
 */
 void LsmFit(real matrix y, real scalar dir, real matrix X, real scalar d, real scalar nsample, real scalar burnin,
 	real scalar interval, real scalar seed, real scalar pilot, real scalar plen, real scalar random,
-	string scalar Bn, string scalar Vn, string scalar Tn, string scalar Dn, string scalar Zn, string scalar An)
+	real rowvector opt, string rowvector nm)
 {
 	class LsmNat scalar N
-	real scalar n, nc, K, S, k, it, rows_, off, refdraw, nd, matok, lp, bestlp
-	real rowvector prior, pvar, b0, q, lo, hi
-	real matrix Z0, beta, Zs, Dbar, Zm, Za, Zr, T, ZZ
-	real colvector res, llk, s2, srt
+	real scalar n, nc, K, S, k, it, rows_, off, nd, matok, na, t, i
+	real rowvector prior, pvar, b0, flags, mb, act
+	real matrix Z0, beta, Zs, Dbar, Zm, Za, Zr, T, EP, Pm, VT, Es, Ev, Eall, EPrior, E0, Em
+	real colvector res, llk, s2, srt, shift
+	string scalar Dn
 
 	n = rows(y)
 	nc = rows(X) / n
 	K = nc + 1
 	S = nsample
 	nd = n * d
+	flags = opt[1..4]
+	act = opt[1..3]
+	na = sum(act)
 	pvar = lsm_priorvar(X, n, dir, 9)
 	prior = (0.125 * n^(2 / d), sqrt(n), 0.125 * n^(2 / d))
-	lsm_start(y, dir, X, d, random, seed, Z0, b0)
+	EPrior = (opt[5], opt[6], opt[5] \ opt[7], opt[8], opt[7] \ opt[9], opt[10], opt[9])
+	E0 = J(n, 3, 0)
+	lsm_start(y, dir, X, d, random, seed, Z0, b0, flags[4])
 	N.open()
-	N.setup(y, dir, X, d, prior, pvar, b0, Z0)
-	rows_ = 2 * K + 2 + S * K + 2 * S + S * nd + n * n
-	res = N.call(sprintf("10 %f %f %f %f %f %f %f %f %f %f", N.L, seed, burnin, interval, S, pilot, plen, 0.6, 0.6, 0.234), rows_)
+	N.setup(y, dir, X, d, prior, pvar, b0, Z0, flags, EPrior, E0)
+	rows_ = 2 * K + 8 + S * K + 2 * S + 3 * S + S * nd + na * S * n + 2 * n * n + nd + K + na * n + 3
+	res = N.call(sprintf("10 %f %f %f %f %f %f %f %f %f %f %f %f", N.L, seed, burnin, interval, S, pilot, plen, 0.6, 0.6, 0.234, 0.6, opt[11]), rows_)
 	N.close()
 	if (hasmissing(res)) {
 		errprintf("nwlsm: the sampler returned missing values\n")
 		exit(498)
 	}
-	beta = colshape(res[(2 * K + 3)..(2 * K + 2 + S * K)], K)
-	off = 2 * K + 2 + S * K
+	off = 2 * K + 8
+	beta = colshape(res[(off + 1)..(off + S * K)], K)
+	off = off + S * K
 	llk = res[(off + 1)..(off + S)]
-	s2 = res[(off + S + 1)..(off + 2 * S)]
-	off = off + 2 * S
+	off = off + S
+	s2 = res[(off + 1)..(off + S)]
+	off = off + S
+	Ev = colshape(res[(off + 1)..(off + 3 * S)]', S)'
+	off = off + 3 * S
 	Zs = colshape(res[(off + 1)..(off + S * nd)], nd)
 	off = off + S * nd
+	Eall = J(S, 3 * n, 0)
+	for (t = 1; t <= 3; t++) {
+		if (act[t]) {
+			Eall[., ((t - 1) * n + 1)..(t * n)] = colshape(res[(off + 1)..(off + S * n)], n)
+			off = off + S * n
+		}
+	}
 	Dbar = colshape(res[(off + 1)..(off + n * n)], n)
+	off = off + n * n
+	Pm = colshape(res[(off + 1)..(off + n * n)], n)
+	off = off + n * n
+	Zm = colshape(res[(off + 1)..(off + nd)]', d)
+	off = off + nd
+	mb = res[(off + 1)..(off + K)]'
+	off = off + K
+	Em = J(n, 3, 0)
+	for (t = 1; t <= 3; t++) {
+		if (act[t]) {
+			Em[., t] = res[(off + 1)..(off + n)]
+			off = off + n
+		}
+	}
+	off = off + 0
+	st_local("__mklstart", strofreal(res[off + 1]))
+	st_local("__mkliter", strofreal(res[off + 2]))
+	st_local("__mklobj", strofreal(res[off + 3], "%18.10g"))
+	// MKL: intercept absorbs the means of the effects (sociality enters twice), the positions are centred
+	shift = 0
+	if (act[1]) {
+		shift = shift + mean(Em[., 1])
+		Em[., 1] = Em[., 1] :- mean(Em[., 1])
+	}
+	if (act[2]) {
+		shift = shift + mean(Em[., 2])
+		Em[., 2] = Em[., 2] :- mean(Em[., 2])
+	}
+	if (act[3]) {
+		shift = shift + 2 * mean(Em[., 3])
+		Em[., 3] = Em[., 3] :- mean(Em[., 3])
+	}
+	mb[1] = mb[1] + shift
+	Zm = lsm_ztrans(Zm, flags[4])
 	// summary of the coefficients
 	T = J(K, 5, .)
 	T[., 1] = mean(beta)'
@@ -357,37 +507,37 @@ void LsmFit(real matrix y, real scalar dir, real matrix X, real scalar d, real s
 		T[k, 4] = srt[max((1, ceil(0.025 * S)))]
 		T[k, 5] = srt[min((S, floor(0.975 * S) + 1))]
 	}
-	st_matrix(Bn, mean(beta))
-	st_matrix(Vn, variance(beta))
-	st_matrix(Tn, T)
-	// positions: centre, align every draw to the reference (the draw with the highest log posterior), then refine twice
-	bestlp = .
-	refdraw = 1
+	st_matrix(nm[1], mean(beta))
+	st_matrix(nm[2], variance(beta))
+	st_matrix(nm[3], T)
+	// variance parameters: sigma2 of the positions, then the active effects
+	VT = lsm_vartable(s2)
+	for (t = 1; t <= 3; t++) if (act[t]) VT = VT \ lsm_vartable(Ev[., t])
+	st_matrix(nm[11], VT)
+	// positions: the mean of the draws, each aligned (rotation, reflection) to the MKL positions
+	Zr = Zm
+	Za = J(n, d, 0)
 	for (it = 1; it <= S; it++) {
-		lp = llk[it] - sum(Zs[it, .] :^ 2) / (2 * s2[it]) - 0.5 * nd * ln(s2[it])
-		if (bestlp == . | lp > bestlp) {
-			bestlp = lp
-			refdraw = it
-		}
+		Za = Za + lsm_procrustes(flags[4] ? colshape(Zs[it, .], d) : colshape(Zs[it, .], d) :- mean(colshape(Zs[it, .], d)), Zr)
 	}
-	Zr = colshape(Zs[refdraw, .], d)
-	Zr = Zr :- mean(Zr)
-	for (k = 1; k <= 3; k++) {
-		Zm = J(n, d, 0)
-		for (it = 1; it <= S; it++) {
-			Za = colshape(Zs[it, .], d)
-			Za = Za :- mean(Za)
-			Zm = Zm + lsm_procrustes(Za, Zr)
-		}
-		Zm = Zm / S
-		Zr = Zm :- mean(Zm)
-	}
+	Za = Za / S
+	// effects: posterior mean and sd
 	matok = (n <= c("max_matdim"))
-	if (matok) {
-		st_matrix(Dn, Dbar)
-		st_matrix(Zn, Zr)
+	for (t = 1; t <= 3; t++) {
+		if (act[t]) {
+			Es = (mean(Eall[., ((t - 1) * n + 1)..(t * n)])', sqrt(diagonal(variance(Eall[., ((t - 1) * n + 1)..(t * n)]))))
+			if (matok) st_matrix(nm[11 + t], Es)
+		}
 	}
-	st_matrix(An, (res[1..(K + 1)]' \ res[(K + 2)..(2 * K + 2)]'))
+	if (matok) {
+		st_matrix(nm[4], Dbar)
+		st_matrix(nm[5], Zm)
+		st_matrix(nm[7], Pm)
+		st_matrix(nm[9], Za)
+		st_matrix(nm[10], Em)
+	}
+	st_matrix(nm[8], mb)
+	st_matrix(nm[6], (res[1..(K + 1)]', res[(K + 2)..(K + 4)]' \ res[(K + 5)..(2 * K + 5)]', res[(2 * K + 6)..(2 * K + 8)]'))
 	st_local("__matok", strofreal(matok))
 	st_local("__llk", strofreal(mean(llk), "%18.10g"))
 	st_local("__llksd", strofreal(sqrt(variance(llk)), "%18.10g"))
@@ -395,37 +545,46 @@ void LsmFit(real matrix y, real scalar dir, real matrix X, real scalar d, real s
 	st_local("__s2sd", strofreal(sqrt(variance(s2)), "%18.10g"))
 	st_local("__priorscale", strofreal(prior[1], "%18.10g"))
 	st_local("__priordf", strofreal(prior[2], "%18.10g"))
-	st_matrix(Dn + "_pv", pvar)
-	st_matrix(Dn + "_b0", b0)
-	external __nwlsm_beta, __nwlsm_llk, __nwlsm_s2, __nwlsm_Z, __nwlsm_D, __nwlsm_ZA
+	st_matrix(nm[4] + "_pv", pvar)
+	st_matrix(nm[4] + "_b0", b0)
+	external __nwlsm_beta, __nwlsm_llk, __nwlsm_s2, __nwlsm_Z, __nwlsm_D, __nwlsm_ZA, __nwlsm_ev, __nwlsm_E, __nwlsm_P, __nwlsm_MZ
 	__nwlsm_beta = beta
 	__nwlsm_llk = llk
 	__nwlsm_s2 = s2
 	__nwlsm_Z = Zs
 	__nwlsm_D = Dbar
-	__nwlsm_ZA = Zr
+	__nwlsm_ZA = Za
+	__nwlsm_ev = Ev
+	__nwlsm_E = Eall
+	__nwlsm_P = Pm
+	__nwlsm_MZ = Zm
 }
 
-// the posterior sample kept in Mata by the last fit: LsmSample("beta"), "llk", "s2", "Z" (one row per draw), "D", "Zalign"
+// the posterior sample kept in Mata by the last fit: LsmSample("beta"), "llk", "s2", "ev", "E", "Z" (one row per draw), "D", "P", "Zalign", "mkl"
 transmorphic matrix LsmSample(string scalar what)
 {
-	external __nwlsm_beta, __nwlsm_llk, __nwlsm_s2, __nwlsm_Z, __nwlsm_D, __nwlsm_ZA
+	external __nwlsm_beta, __nwlsm_llk, __nwlsm_s2, __nwlsm_Z, __nwlsm_D, __nwlsm_ZA, __nwlsm_ev, __nwlsm_E, __nwlsm_P, __nwlsm_MZ
 
 	if (what == "beta") return(__nwlsm_beta)
 	if (what == "llk") return(__nwlsm_llk)
 	if (what == "s2") return(__nwlsm_s2)
+	if (what == "ev") return(__nwlsm_ev)
+	if (what == "E") return(__nwlsm_E)
 	if (what == "Z") return(__nwlsm_Z)
 	if (what == "D") return(__nwlsm_D)
+	if (what == "P") return(__nwlsm_P)
 	if (what == "Zalign") return(__nwlsm_ZA)
+	if (what == "mkl") return(__nwlsm_MZ)
 	errprintf("LsmSample(): unknown item\n")
 	exit(198)
 }
 
-// writes the draws of the coefficients, the log likelihood and the latent-position variance into the (empty) current dataset
-void LsmSaveDraws(string rowvector names)
+// writes the draws of the coefficients, the log likelihood and the variances into the (empty) current dataset
+void LsmSaveDraws(string rowvector names, real rowvector act)
 {
 	real scalar k, S
-	external __nwlsm_beta, __nwlsm_llk, __nwlsm_s2
+	string rowvector vn
+	external __nwlsm_beta, __nwlsm_llk, __nwlsm_s2, __nwlsm_ev
 
 	S = rows(__nwlsm_beta)
 	st_addobs(S)
@@ -437,27 +596,113 @@ void LsmSaveDraws(string rowvector names)
 	st_store(., "loglik", __nwlsm_llk)
 	(void) st_addvar("double", "sigma2")
 	st_store(., "sigma2", __nwlsm_s2)
+	vn = ("sender_var", "receiver_var", "sociality_var")
+	for (k = 1; k <= 3; k++) {
+		if (act[k]) {
+			(void) st_addvar("double", vn[k])
+			st_store(., vn[k], __nwlsm_ev[., k])
+		}
+	}
 }
 
 // test helper: the plugin's log likelihood and log prior of Z at (beta, Z, s2), and its incremental log-likelihood change
-// if actor i moves to znew. Returns (loglik, logprior_Z, dll).
+// if actor i moves to znew. Returns (loglik, logprior_Z, dll, dll_effect), the last for the effect of type t (0 = none) of actor i
+// changing by delta. E: n x 3 start values of the effects; opt as for LsmFit.
 real rowvector LsmCheck(real matrix y, real scalar dir, real matrix X, real scalar d, real rowvector beta, real matrix Z,
-	real scalar s2, real scalar i, real rowvector znew)
+	real scalar s2, real scalar i, real rowvector znew, real rowvector opt, real matrix E, real scalar t, real scalar delta)
 {
 	class LsmNat scalar N
-	real colvector r1, r2
+	real colvector r1, r2, r3
 	real rowvector prior, pvar
+	real matrix EPrior
 	real scalar n
 
 	n = rows(y)
 	pvar = lsm_priorvar(X, n, dir, 9)
 	prior = (1, 1, s2)
+	EPrior = (opt[5], opt[6], opt[5] \ opt[7], opt[8], opt[7] \ opt[9], opt[10], opt[9])
 	N.open()
-	N.setup(y, dir, X, d, prior, pvar, beta, Z)
+	N.setup(y, dir, X, d, prior, pvar, beta, Z, opt[1..4], EPrior, E)
 	r1 = N.call(sprintf("1 %f", N.L), 2)
 	r2 = N.call(sprintf("2 %f %f ", N.L, i) + invtokens(strofreal(znew, "%20.15g")), 1)
+	r3 = 0
+	if (t > 0) r3 = N.call(sprintf("3 %f %f %f %s", N.L, t - 1, i, strofreal(delta, "%20.15g")), 1)
 	N.close()
-	return((r1', r2))
+	return((r1', r2, r3))
+}
+
+// test helper: objective of the MKL optimisation at the state (target = 0.9 for a tie, 0.15 for none), the analytic gradient and a
+// central-difference gradient. Returns (f, analytic' , numeric') as a row vector.
+real rowvector LsmCheckMKL(real matrix y, real scalar dir, real matrix X, real scalar d, real rowvector beta, real matrix Z,
+	real rowvector opt, real matrix E)
+{
+	class LsmNat scalar N
+	real colvector r
+	real rowvector prior, pvar
+	real matrix EPrior
+	real scalar n, P
+
+	n = rows(y)
+	pvar = lsm_priorvar(X, n, dir, 9)
+	prior = (1, 1, 1)
+	EPrior = (opt[5], opt[6], opt[5] \ opt[7], opt[8], opt[7] \ opt[9], opt[10], opt[9])
+	P = n * d + cols(beta) + n * (opt[1] + opt[2] + opt[3])
+	N.open()
+	N.setup(y, dir, X, d, prior, pvar, beta, Z, opt[1..4], EPrior, E)
+	r = N.call(sprintf("4 %f", N.L), 1 + 2 * P)
+	N.close()
+	return(r')
+}
+
+// plot data for nwlsmplot: node rows (x, y, colour group, weight, label) and edge rows (x1, y1, x2, y2) kept in externals until LsmPlotStore()
+void LsmPlotPrep(string scalar Aname, string scalar Zname, real scalar d1, real scalar d2, real scalar dir, string scalar color,
+	string scalar sizevar, string scalar sizemat, string scalar label, real scalar edges)
+{
+	real matrix A, Z, ed, pd
+	real colvector w, cg
+	real scalar n, i, j
+	string colvector lb
+	external __nwlsm_pd, __nwlsm_ed, __nwlsm_lb
+
+	A = st_matrix(Aname)
+	Z = st_matrix(Zname)
+	n = rows(Z)
+	w = J(n, 1, 1)
+	if (sizevar != "") w = st_data(., sizevar)
+	if (sizemat != "") w = st_matrix(sizemat)[., 1]
+	if (sizevar != "" | sizemat != "") {
+		// marker area proportional to a positive weight: shift to a positive range
+		w = w :- min(w)
+		w = w :+ 0.15 * max((max(w), 1e-6)) :+ 1e-6
+	}
+	cg = J(n, 1, 1)
+	if (color != "") cg = st_data(., color)
+	lb = J(n, 1, "")
+	if (label != "") lb = st_sdata(., label)
+	pd = (Z[., d1], Z[., d2], cg, w)
+	ed = J(0, 4, .)
+	if (edges) {
+		for (i = 1; i <= n; i++) for (j = 1; j <= n; j++) {
+			if (i == j) continue
+			if (!dir & j < i) continue
+			if (A[i, j] < . & A[i, j] != 0) ed = ed \ (Z[i, d1], Z[i, d2], Z[j, d1], Z[j, d2])
+		}
+	}
+	__nwlsm_pd = pd
+	__nwlsm_ed = ed
+	__nwlsm_lb = lb
+}
+
+void LsmPlotStore()
+{
+	real scalar n, m
+	external __nwlsm_pd, __nwlsm_ed, __nwlsm_lb
+
+	n = rows(__nwlsm_pd)
+	m = rows(__nwlsm_ed)
+	st_store((1::n), ("x", "y", "cg", "w"), __nwlsm_pd)
+	st_sstore((1::n), "lb", __nwlsm_lb)
+	if (m > 0) st_store((n + 1::n + m), ("ex1", "ey1", "ex2", "ey2"), __nwlsm_ed)
 }
 
 end
