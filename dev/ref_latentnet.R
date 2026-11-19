@@ -200,3 +200,59 @@ eta <- 1.0 - as.matrix(dist(z)); Y <- matrix(rpois(n * n, exp(eta)), n, n); Y[lo
 write.csv(data.frame(truth = truth), file.path(out, "poisclu36_truth.csv"), row.names = FALSE)
 fam_fixture("poisclu36", Y, FALSE, 'net ~ euclidean(d = 2, G = 2)', "Poisson", seed = 161)
 cat("valued done\n")
+
+# LSM_GOF_FROM_HERE
+# ---- Milestone 5 fixtures (nwlsm 0.5.0): goodness of fit. latentnet's gof() on three fits (1000 posterior draws, one simulated network per draw): the observed
+# statistics and the mean and sd of the simulated ones, cell by cell (files gof_<case>.csv: stat, cell, obs, mean, sd). To run this section alone, source lines 1-4 first.
+gof_fixture <- function(name, f, nw, terms, bipart = FALSE) {
+  g <- gof(f, nsim = 1000, GOF = terms)
+  rows <- list()
+  add <- function(stat, obs, sim) rows[[length(rows) + 1]] <<- data.frame(stat = stat, cell = seq_along(obs) - 1, obs = as.numeric(obs), mean = colMeans(sim), sd = apply(sim, 2, sd))
+  if (!is.null(g$sim.ideg)) add("idegree", g$obs.ideg, g$sim.ideg)
+  if (!is.null(g$sim.odeg)) add("odegree", g$obs.odeg, g$sim.odeg)
+  if (!is.null(g$sim.deg)) add("degree", g$obs.deg, g$sim.deg)
+  if (!is.null(g$sim.espart)) add("espartners", g$obs.espart, g$sim.espart)
+  if (!is.null(g$sim.dspart)) add("dspartners", g$obs.dspart, g$sim.dspart)
+  if (!is.null(g$sim.dist)) add("distance", g$obs.dist, g$sim.dist)
+  if (!is.null(g$sim.model)) add("model", g$obs.model, g$sim.model)
+  write.csv(do.call(rbind, rows), file.path(out, paste0("gof_", name, ".csv")), row.names = FALSE)
+}
+ctlg <- ergmm.control(burnin = 20000, sample.size = 1000, interval = 20)
+data(sampson); set.seed(91)
+fs <- ergmm(samplike ~ euclidean(d = 2), control = ctlg)
+gof_fixture("sampson", fs, samplike, ~idegree + odegree + espartners + dspartners + distance)
+el <- read.csv(file.path(out, "random40_d2_edges.csv")); A <- matrix(0, 40, 40); A[cbind(el$from, el$to)] <- 1; A <- pmax(A, t(A))
+netu <- network(A, directed = FALSE); set.vertex.attribute(netu, "x", read.csv(file.path(out, "random40_x.csv"))$x)
+set.seed(92); fu <- ergmm(netu ~ euclidean(d = 2) + absdiff("x"), control = ctlg)
+# latentnet 2.12.0's simulate() makes an UNDIRECTED network by drawing every ordered pair and keeping a tie if either draw is one (the simulated networks have
+# 1 - (1 - p)^2 instead of p as tie probability: 493 instead of 337 edges on average here), so its gof() is biased for undirected networks. The undirected
+# reference is therefore made with latentnet's posterior draws, ONE draw per dyad (upper triangle), and the ergm statistics of the simulated networks.
+gof_fixture_u <- function(name, f, nw) {
+  n <- network.size(nw); ns <- dim(f$sample$Z)[1]; terms <- list()
+  sd_ <- array(0, c(ns, n)); se <- array(0, c(ns, n - 1)); sdp <- se; sdist <- sd_
+  set.seed(94)
+  for (s in seq_len(ns)) {
+    th <- list(Z = f$sample$Z[s, , ], beta = f$sample$beta[s, ]); p <- plogis(latentnet:::ergmm.eta(f$model, th))
+    Y <- matrix(0, n, n); u <- upper.tri(Y); Y[u] <- rbinom(sum(u), 1, p[u]); Y <- Y + t(Y)
+    g <- network(Y, directed = FALSE)
+    sd_[s, ] <- summary(g ~ degree(0:(n - 1)), drop = FALSE)
+    se[s, ] <- summary(g ~ esp(0:(n - 2)), drop = FALSE)
+    sdp[s, ] <- summary(g ~ dsp(0:(n - 2)), drop = FALSE)
+    sdist[s, ] <- ergm.geodistdist(g)
+  }
+  od <- ergm.geodistdist(nw); od[od == Inf] <- n
+  sdist[sdist == Inf] <- n
+  rows <- list()
+  add <- function(stat, obs, sim) rows[[length(rows) + 1]] <<- data.frame(stat = stat, cell = seq_along(obs) - 1, obs = as.numeric(obs), mean = colMeans(sim), sd = apply(sim, 2, sd))
+  add("degree", summary(nw ~ degree(0:(n - 1)), drop = FALSE), sd_)
+  add("espartners", summary(nw ~ esp(0:(n - 2)), drop = FALSE), se)
+  add("dspartners", summary(nw ~ dsp(0:(n - 2)), drop = FALSE), sdp)
+  add("distance", od, sdist)
+  write.csv(do.call(rbind, rows), file.path(out, paste0("gof_", name, ".csv")), row.names = FALSE)
+}
+gof_fixture_u("random40", fu, netu)
+el <- read.csv(file.path(out, "sr40_edges.csv")); A <- matrix(0, 40, 40); A[cbind(el$from, el$to)] <- 1
+netd <- network(A, directed = TRUE); set.vertex.attribute(netd, "x", read.csv(file.path(out, "sr40_x.csv"))$x)
+set.seed(93); fd <- ergmm(netd ~ euclidean(d = 2) + rsender + rreceiver + absdiff("x"), control = ctlg)
+gof_fixture("sr40", fd, netd, ~idegree + odegree + espartners + dspartners + distance)
+cat("gof done\n")

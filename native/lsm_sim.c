@@ -847,6 +847,163 @@ cleanup:
 	return rc;
 }
 
+
+/* ---- goodness of fit (code 20): networks simulated from posterior draws and the statistics of the observed and the simulated networks ---- */
+/* groups (bits of mask): 1 degree (undirected) or in-degree, 2 out-degree, 4 edgewise shared partners, 8 dyadwise shared partners, 16 geodesic distances,
+   32 model statistics (total value and the sums of the covariates over the ties), 64 distribution of the tie values */
+static double rpois_(Rng *r, double lam) {
+	if (lam <= 0.0) return 0.0;
+	if (lam < 30.0) { double L = exp(-lam), p = 1.0; int k = 0; do { k++; p *= runif(r); } while (p > L); return (double)(k - 1); }
+	{
+		double slam = sqrt(lam), loglam = log(lam), b = 0.931 + 2.53 * slam, a = -0.059 + 0.02483 * b, invalpha = 1.1239 + 1.1328 / (b - 3.4), vr = 0.9277 - 3.6224 / (b - 2.0);
+		for (;;) {
+			double U = runif(r) - 0.5, V = runif(r), us = 0.5 - fabs(U), k = floor((2.0 * a / us + b) * U + lam + 0.43);
+			if (us >= 0.07 && V <= vr) return k;
+			if (k < 0 || (us < 0.013 && V > us)) continue;
+			if (log(V) + log(invalpha) - log(a / (us * us) + b) <= -lam + k * loglam - lgamma(k + 1.0)) return k;
+		}
+	}
+}
+static double rbinom_(Rng *r, double tr, double p) { /* exact, by geometric jumps over the failures */
+	double lq, pos = 0.0, cnt = 0.0;
+	if (p <= 0.0) return 0.0;
+	if (p >= 1.0) return tr;
+	if (p > 0.5) return tr - rbinom_(r, tr, 1.0 - p);
+	lq = log1p(-p);
+	for (;;) { pos += floor(log(runif(r)) / lq) + 1.0; if (pos > tr) break; cnt += 1.0; }
+	return cnt;
+}
+typedef struct { int n, dir, mask, nc, M, ncut, nb, words; const double *cuts; int w[7]; } GofCfg;
+static int gof_widths(const Model *g, int mask, int M, int ncut, int *w) {
+	int n = g->n, t = 0, k;
+	w[0] = (mask & 1) ? n : 0; w[1] = (mask & 2) ? n : 0; w[2] = (mask & 4) ? n - 1 : 0; w[3] = (mask & 8) ? n - 1 : 0; w[4] = (mask & 16) ? n : 0;
+	w[5] = (mask & 32) ? 1 + g->nc : 0; w[6] = (mask & 64) ? (g->fam == 3 ? ncut + 1 : M + 1) : 0;
+	for (k = 0; k < 7; k++) t += w[k];
+	return t;
+}
+static inline int popc(uint64_t x) { int c = 0; while (x) { x &= x - 1; c++; } return c; }
+static inline int ctz64(uint64_t x) { int b = 0; while (!(x & 1)) { x >>= 1; b++; } return b; }
+/* statistics of the network with values Y (n x n, zero diagonal, symmetric if undirected) into row (zeroed by the caller) */
+static void gof_row(const Model *g, const GofCfg *c, const double *Y, double *row) {
+	int n = g->n, dir = g->dir, W = c->words, i, j, k; uint64_t *rb, *cb, *vis, *fr, *nx; double *o = row;
+	rb = calloc((size_t)n * W, 8); cb = calloc((size_t)n * W, 8); vis = calloc(W, 8); fr = calloc(W, 8); nx = calloc(W, 8);
+	if (!rb || !cb || !vis || !fr || !nx) { free(rb); free(cb); free(vis); free(fr); free(nx); return; }
+	if (g->fam != 3) for (i = 0; i < n; i++) for (j = 0; j < n; j++) if (i != j && Y[(size_t)i * n + j] > 0.0) { rb[(size_t)i * W + j / 64] |= (uint64_t)1 << (j % 64); cb[(size_t)j * W + i / 64] |= (uint64_t)1 << (i % 64); }
+	{
+		double *od = o; int off = 0;
+		double *hdeg = od + off; off += c->w[0]; double *hodeg = od + off; off += c->w[1]; double *hesp = od + off; off += c->w[2]; double *hdsp = od + off; off += c->w[3];
+		double *hdist = od + off; off += c->w[4]; double *hmod = od + off; off += c->w[5]; double *hval = od + off;
+		if (g->fam != 3 && (c->mask & 3)) {
+			for (i = 0; i < n; i++) {
+				int dout = 0, din = 0; for (k = 0; k < W; k++) { dout += popc(rb[(size_t)i * W + k]); din += popc(cb[(size_t)i * W + k]); }
+				if (c->mask & 1) hdeg[dir ? din : dout] += 1.0;
+				if ((c->mask & 2) && dir) hodeg[dout] += 1.0;
+			}
+		}
+		if (g->fam != 3 && (c->mask & 12)) {
+			for (i = 0; i < n; i++) for (j = dir ? 0 : i + 1; j < n; j++) {
+				int cnt = 0, tie;
+				if (i == j) continue;
+				tie = (Y[(size_t)i * n + j] > 0.0);
+				if (!tie && !(c->mask & 8)) continue;
+				for (k = 0; k < W; k++) cnt += popc(dir ? (rb[(size_t)i * W + k] & cb[(size_t)j * W + k]) : (rb[(size_t)i * W + k] & rb[(size_t)j * W + k]));
+				if (cnt > n - 2) cnt = n - 2;
+				if (tie && (c->mask & 4)) hesp[cnt] += 1.0;
+				if (c->mask & 8) hdsp[cnt] += 1.0;
+			}
+		}
+		if (g->fam != 3 && (c->mask & 16)) {
+			double reach = 0.0;
+			for (i = 0; i < n; i++) {
+				int level = 0;
+				memset(vis, 0, 8 * (size_t)W); memset(fr, 0, 8 * (size_t)W);
+				vis[i / 64] |= (uint64_t)1 << (i % 64); fr[i / 64] |= (uint64_t)1 << (i % 64);
+				for (;;) {
+					int any = 0, cntn = 0;
+					memset(nx, 0, 8 * (size_t)W);
+					for (k = 0; k < W; k++) { uint64_t f = fr[k]; while (f) { int v = k * 64 + ctz64(f), q; f &= f - 1; for (q = 0; q < W; q++) nx[q] |= rb[(size_t)v * W + q]; } }
+					for (k = 0; k < W; k++) { nx[k] &= ~vis[k]; vis[k] |= nx[k]; fr[k] = nx[k]; cntn += popc(nx[k]); if (nx[k]) any = 1; }
+					if (!any) break;
+					level++;
+					hdist[level - 1] += (double)cntn; reach += (double)cntn;
+				}
+			}
+			hdist[n - 1] += (double)n * (n - 1) - reach;
+			if (!dir) for (k = 0; k < n; k++) hdist[k] *= 0.5;
+		}
+		if (c->mask & 32) {
+			double e = 0.0; int q;
+			for (i = 0; i < n; i++) for (j = dir ? 0 : i + 1; j < n; j++) if (i != j) {
+				double y = Y[(size_t)i * n + j]; if (y == 0.0) continue;
+				e += y; for (q = 0; q < c->nc; q++) hmod[1 + q] += y * g->x[(size_t)q * n * n + (size_t)i * n + j];
+			}
+			hmod[0] = e;
+		}
+		if (c->mask & 64) {
+			for (i = 0; i < n; i++) for (j = dir ? 0 : i + 1; j < n; j++) if (i != j) {
+				double y = Y[(size_t)i * n + j]; int cell;
+				if (g->fam == 3) { cell = 0; for (k = 0; k < c->ncut; k++) if (y > c->cuts[k]) cell++; }
+				else { cell = (int)(y + 0.5); if (cell > c->M) cell = c->M; if (cell < 0) cell = 0; }
+				hval[cell] += 1.0;
+			}
+		}
+	}
+	free(rb); free(cb); free(vis); free(fr); free(nx);
+}
+typedef struct { const Model *g; const GofCfg *c; const double *draws; int pd; double *out; int RW; uint64_t seed; } GofJob;
+static void gof_draw(void *ctx, int idx) {
+	GofJob *J = (GofJob *)ctx; const Model *g = J->g; int n = g->n, d = g->d, K = g->K, i, j, t; const double *p = J->draws + (size_t)idx * J->pd, *beta = p, *Z = p + K, *ef[3]; double disp, *Y; Rng r; size_t off = K + (size_t)n * d;
+	Y = calloc((size_t)n * n, sizeof(double));
+	if (!Y) return;
+	for (t = 0; t < 3; t++) { ef[t] = NULL; if (g->act[t]) { ef[t] = p + off; off += n; } }
+	disp = p[off];
+	rng_seed(&r, J->seed + 7919ULL * (uint64_t)(idx + 1));
+	for (i = 0; i < n; i++) for (j = g->dir ? 0 : i + 1; j < n; j++) {
+		double eta, v;
+		if (i == j) continue;
+		eta = linpred(g, beta, (const double *const *)ef, i, j) - latt(g->lt, d, Z + i * d, Z + j * d);
+		switch (g->fam) {
+		case 1: v = rpois_(&r, exp(eta > 40.0 ? 40.0 : eta)); break;
+		case 2: v = rbinom_(&r, g->tr[(size_t)i * n + j], 1.0 / (1.0 + exp(-eta))); break;
+		case 3: v = eta + sqrt(disp) * rnorm(&r); break;
+		default: v = runif(&r) < 1.0 / (1.0 + exp(-eta)) ? 1.0 : 0.0; break;
+		}
+		Y[(size_t)i * n + j] = v;
+		if (!g->dir) Y[(size_t)j * n + i] = v;
+	}
+	gof_row(g, J->c, Y, J->out + (size_t)(idx + 1) * J->RW);
+	free(Y);
+}
+static int run_gof(const Model *g, long L, char *args_rest) {
+	int nsim, T, mask, M, ncut, n = g->n, d = g->d, K = g->K, k, pd, RW, rc = 0; uint64_t seed; long pos = L, m; char *tok;
+	double *cuts = NULL, *draws = NULL, *out = NULL, *Yo = NULL; GofCfg c; GofJob J;
+	(void)args_rest;
+	tok = strtok(NULL, " \t"); nsim = tok ? (int)atof(tok) : 0;
+	tok = strtok(NULL, " \t"); seed = tok ? (uint64_t)atof(tok) : 1;
+	tok = strtok(NULL, " \t"); T = tok ? (int)atof(tok) : 1;
+	tok = strtok(NULL, " \t"); mask = tok ? (int)atof(tok) : 0;
+	tok = strtok(NULL, " \t"); M = tok ? (int)atof(tok) : 10;
+	tok = strtok(NULL, " \t"); ncut = tok ? (int)atof(tok) : 0;
+	if (nsim < 1 || mask < 1 || M < 1 || ncut < 0 || ncut > 1000) { SF_error("lsm_sim: bad goodness-of-fit settings\n"); return 198; }
+	if (T == 0) T = ncores();
+	pd = K + n * d + n * (g->act[0] + g->act[1] + g->act[2]) + 1;
+	cuts = malloc(sizeof(double) * (ncut > 0 ? ncut : 1)); draws = malloc(sizeof(double) * (size_t)pd * nsim);
+	c.n = n; c.dir = g->dir; c.mask = mask; c.nc = g->nc; c.M = M; c.ncut = ncut; c.words = (n + 63) / 64; c.cuts = cuts;
+	RW = gof_widths(g, mask, M, ncut, c.w);
+	out = calloc((size_t)(nsim + 1) * RW, sizeof(double)); Yo = calloc((size_t)n * n, sizeof(double));
+	if (!cuts || !draws || !out || !Yo) { SF_error("lsm_sim: not enough memory\n"); rc = 909; goto done; }
+	for (k = 0; k < ncut; k++) { ST_double v; SF_vdata(1, (ST_int)(++pos), &v); cuts[k] = v; }
+	for (m = 0; m < (long)pd * nsim; m++) { ST_double v; SF_vdata(1, (ST_int)(++pos), &v); draws[m] = v; }
+	{ int i, j; for (i = 0; i < n; i++) for (j = 0; j < n; j++) if (i != j && g->y[i * n + j] >= 0) Yo[(size_t)i * n + j] = g->fam == 0 ? (g->y[i * n + j] == 1 ? 1.0 : 0.0) : g->yv[(size_t)i * n + j]; }
+	gof_row(g, &c, Yo, out);
+	J.g = g; J.c = &c; J.draws = draws; J.pd = pd; J.out = out; J.RW = RW; J.seed = seed;
+	par_run(T, nsim, gof_draw, &J);
+	for (m = 0; m < (long)(nsim + 1) * RW; m++) SF_vstore(2, (ST_int)(m + 1), out[m]);
+done:
+	free(cuts); free(draws); free(out); free(Yo);
+	return rc;
+}
+
 STDLL stata_call(int argc, char *argv[]) {
 	char *buf, *tok;
 	int code, rc = 0;
@@ -913,6 +1070,7 @@ STDLL stata_call(int argc, char *argv[]) {
 			free(x); free(gr); free(EY);
 		}
 		else if (code == 10) { rc = run_chains(&g, L); }
+		else if (code == 20) { rc = run_gof(&g, L, NULL); }
 		else { SF_error("lsm_sim: unknown code (plugin and package versions do not match)\n"); rc = 198; }
 	}
 	state_free(&s); model_free(&g); free(buf);

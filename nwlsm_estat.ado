@@ -24,6 +24,14 @@ program nwlsm_estat, rclass
 		_nwlsm_predict `rest'
 		return add
 	}
+	else if "`subcmd'" == "gof" {
+		_nwlsm_gof `rest'
+		return add
+	}
+	else if "`subcmd'" == "ppcheck" {
+		_nwlsm_ppcheck `rest'
+		return add
+	}
 	else {
 		di as err "estat `subcmd' not allowed after nwlsm"
 		exit 321
@@ -104,7 +112,7 @@ end
 capture program drop _nwlsm_mcmcdiag
 program _nwlsm_mcmcdiag, rclass
 	version 14
-	syntax [, NOList]
+	syntax [, NOList GRAPH NAME(string)]
 	capture mata: st_numscalar("__nwlsm_Sck", rows(LsmSample("beta")))
 	if _rc {
 		di as error "the posterior draws of the last fit are no longer in memory; fit the model again"
@@ -140,6 +148,10 @@ program _nwlsm_mcmcdiag, rclass
 				local nm `nm' `t'_var
 			}
 		}
+	}
+	if "`e(family)'" == "normal" {
+		mata: __nwlsm_dg = __nwlsm_dg \ LsmDiag(LsmSample("disp"), `C')
+		local nm `nm' dispersion
 	}
 	mata: st_matrix("`R'", __nwlsm_dg)
 	capture mata: mata drop __nwlsm_dg
@@ -181,6 +193,44 @@ program _nwlsm_mcmcdiag, rclass
 		di
 		di as text "{p 0 0 2}ESS: effective sample size by the initial monotone positive sequence estimator. Geweke z: first 10% of the draws against the last 50%; |z| above 2 suggests that the chain has not settled.{p_end}"
 		if `C' > 1 di as text "{p 0 0 2}With `C' chains: ESS is the sum over the chains, Geweke z the value of largest size over the chains, Rhat the Gelman-Rubin potential scale reduction factor (values close to 1, say below 1.1, indicate that the chains agree).{p_end}"
+	}
+	if "`graph'" != "" {
+		if "`name'" == "" local name "mcmcdiag"
+		local np : word count `nm'
+		local a1 = (`: list posof "sender" in effs' > 0)
+		local a2 = (`: list posof "receiver" in effs' > 0)
+		local a3 = (`: list posof "sociality" in effs' > 0)
+		mata: st_matrix("__nwlsm_trace", LsmTraceMat((`a1', `a2', `a3')))
+		local ttl "Trace plots of the posterior draws"
+		if `C' > 1 local ttl "`ttl' (`C' chains)"
+		local Sc = rowsof(__nwlsm_trace) / `C'
+		preserve
+		quietly drop _all
+		quietly set obs `Sc'
+		quietly gen draw = _n
+		local panels
+		forvalues k = 1/`np' {
+			local pn : word `k' of `nm'
+			local lines
+			forvalues c = 1/`C' {
+				quietly gen double v`k'_`c' = .
+				mata: st_store(., "v`k'_`c'", st_matrix("__nwlsm_trace")[((`c' - 1) * `Sc' + 1)..(`c' * `Sc'), `k'])
+				local col = word("navy maroon forest_green dkorange purple teal sienna gs8", mod(`c' - 1, 8) + 1)
+				local lines `lines' (line v`k'_`c' draw, lcolor(`col') lwidth(vthin))
+			}
+			local sub
+			if `C' > 1 local sub subtitle("Rhat = `: di %5.3f `R'[`k', 5]'", size(vsmall))
+			twoway `lines', title("`pn'", size(small)) `sub' xtitle("draw") ytitle("") legend(off) nodraw name(__lsmtr`k', replace)
+			local panels `panels' __lsmtr`k'
+		}
+		local cols = cond(`np' <= 4, 2, 3)
+		graph combine `panels', cols(`cols') title("`ttl'", size(medium)) name(`name', replace)
+		forvalues k = 1/`np' {
+			capture graph drop __lsmtr`k'
+		}
+		restore
+		capture matrix drop __nwlsm_trace
+		di as txt "{p 0 0 2}(trace plots saved as {bf:`name'}; one line per chain)"
 	}
 	return matrix diag = `R'
 end
@@ -277,4 +327,305 @@ program _nwlsm_clusters, rclass
 	}
 	return matrix Q = `Q'
 	return matrix class = `CL'
+end
+
+* estat gof: goodness of fit as latentnet's gof(): networks simulated from posterior draws against the observed network
+capture program drop _nwlsm_gof
+program _nwlsm_gof, rclass
+	version 14
+	syntax [, NSIM(integer 100) SEED(string) GOF(string) PLOT MAXDEG(integer -1) MAXDIST(integer -1) NAME(string) THReads(integer 0)]
+	capture mata: st_numscalar("__nwlsm_Sck", rows(LsmSample("beta")))
+	if _rc {
+		di as error "the posterior draws of the last fit are no longer in memory; fit the model again"
+		exit 498
+	}
+	scalar drop __nwlsm_Sck
+	if `nsim' < 2 {
+		di as error "nsim() must be at least 2"
+		exit 198
+	}
+	if `threads' < 0 | `threads' > 256 {
+		di as error "threads() must be between 1 and 256"
+		exit 198
+	}
+	if `"`seed'"' != "" {
+		capture confirm integer number `seed'
+		if _rc | real(`"`seed'"') < 0 | real(`"`seed'"') > 2147483647 {
+			di as error "seed() must be an integer between 0 and 2147483647"
+			exit 198
+		}
+	}
+	else local seed = floor(runiform() * 2147483646) + 1
+	local dir = ("`e(directed)'" == "directed")
+	local fam "`e(family)'"
+	if "`fam'" == "" local fam "bernoulli"
+	local valued = ("`fam'" != "bernoulli")
+	local normal = ("`fam'" == "normal")
+	* statistics: R's  GOF = ~ degree + ... ; default as latentnet (idegree + odegree + distance; degree + distance if undirected), plus the values of a valued network
+	if `"`gof'"' == "" {
+		if `normal' local gof "model values"
+		else if `dir' local gof "idegree odegree distance"
+		else local gof "degree distance"
+		if `valued' & !`normal' local gof "`gof' values"
+	}
+	local gof = subinstr(subinstr(`"`gof'"', "~", " ", .), "+", " ", .)
+	local allterms "degree idegree odegree espartners dspartners distance model values"
+	local mask 0
+	local want
+	foreach tok of local gof {
+		local found
+		foreach t of local allterms {
+			if "`tok'" == "`t'" local found "`t'"
+		}
+		if "`found'" == "" {
+			local nm 0
+			foreach t of local allterms {
+				if strpos("`t'", "`tok'") == 1 {
+					local found "`t'"
+					local ++nm
+				}
+			}
+			if `nm' != 1 local found
+		}
+		if "`found'" == "" {
+			di as error "{p 0 0 2}estat gof: unknown statistic {bf:`tok'}; choose from degree, idegree, odegree, espartners, dspartners, distance, model and values.{p_end}"
+			exit 198
+		}
+		if !`dir' & inlist("`found'", "idegree", "odegree") {
+			di as error "estat gof: `found' needs a directed network; use degree."
+			exit 198
+		}
+		if `dir' & "`found'" == "degree" {
+			di as error "estat gof: degree is for undirected networks; use idegree and odegree."
+			exit 198
+		}
+		if "`found'" == "values" & !`valued' {
+			di as error "estat gof: values is for the valued families (family(poisson), family(binomial) or family(normal))."
+			exit 198
+		}
+		if `normal' & !inlist("`found'", "model", "values") {
+			di as error "{p 0 0 2}estat gof: after family(normal) the statistics of the network structure are not defined; use model and values.{p_end}"
+			exit 198
+		}
+		local inw : list found in want
+		if !`inw' local want `want' `found'
+	}
+	foreach t of local want {
+		if "`t'" == "degree" | "`t'" == "idegree" local mask = `mask' + 1
+		if "`t'" == "odegree" local mask = `mask' + 2
+		if "`t'" == "espartners" local mask = `mask' + 4
+		if "`t'" == "dspartners" local mask = `mask' + 8
+		if "`t'" == "distance" local mask = `mask' + 16
+		if "`t'" == "model" local mask = `mask' + 32
+		if "`t'" == "values" local mask = `mask' + 64
+	}
+	mata: st_numscalar("__nwlsm_S", rows(LsmSample("beta")))
+	if `nsim' > scalar(__nwlsm_S) {
+		di as text "(nsim() reduced to the number of posterior draws, " scalar(__nwlsm_S) ")"
+		local nsim = scalar(__nwlsm_S)
+	}
+	scalar drop __nwlsm_S
+	mata: LsmGof(`nsim', `seed', `mask', `threads', 10, "__lsmgof")
+	* print
+	local order "degree idegree odegree espartners dspartners distance model values"
+	local g_degree deg
+	local g_idegree ideg
+	local g_odegree odeg
+	local g_espartners esp
+	local g_dspartners dsp
+	local g_distance dist
+	local g_model model
+	local g_values val
+	local d_degree "degree"
+	local d_idegree "in-degree"
+	local d_odegree "out-degree"
+	local d_espartners "edgewise shared partners"
+	local d_dspartners "dyadwise shared partners"
+	local d_distance "minimum geodesic distance"
+	local d_model "model statistics"
+	local d_values "tie values"
+	local cnames : colnames e(b)
+	foreach t of local order {
+		local inw : list t in want
+		if !`inw' continue
+		local g "`g_`t''"
+		tempname P
+		matrix `P' = __lsmgof_`g'
+		local k = rowsof(`P')
+		local labs
+		forvalues i = 1/`k' {
+			if "`t'" == "model" {
+				if `i' == 1 local lb = cond(`valued', "total_value", "edges")
+				else {
+					local lb : word `i' of `cnames'
+				}
+			}
+			else if "`t'" == "distance" local lb = cond(`i' == `k', "Inf", "`i'")
+			else if "`t'" == "values" {
+				if `normal' local lb = "bin`i'"
+				else local lb = cond(`i' == `k', "`=`k'-1'+", "`=`i'-1'")
+			}
+			else local lb = `i' - 1
+			local labs `labs' `lb'
+		}
+		local hd "Statistic"
+		if "`t'" == "degree" local hd "Degree"
+		if "`t'" == "idegree" local hd "In-degree"
+		if "`t'" == "odegree" local hd "Out-degree"
+		if "`t'" == "espartners" local hd "ESP"
+		if "`t'" == "dspartners" local hd "DSP"
+		if "`t'" == "distance" local hd "Distance"
+		if "`t'" == "values" local hd = cond(`normal', "Value bin", "Value")
+		local w = 12
+		foreach lb of local labs {
+			local w = max(`w', min(28, udstrlen("`lb'")))
+		}
+		matrix colnames `P' = obs min mean max MC_p-value
+		matrix rownames `P' = `labs'
+		di
+		di as txt "Goodness of fit: `d_`t'' (" as res `nsim' as txt " networks simulated from the posterior)"
+		di as txt "{hline `=`w'+1'}{c TT}{hline 52}"
+		di as txt %`w's "`hd'" " {c |}" %10s "Observed" %10s "Min" %10s "Mean" %10s "Max" %12s "MC p-value"
+		di as txt "{hline `=`w'+1'}{c +}{hline 52}"
+		forvalues i = 1/`k' {
+			if `P'[`i',1] == 0 & `P'[`i',2] == 0 & `P'[`i',4] == 0 continue
+			local lb : word `i' of `labs'
+			local fm "%10.0f"
+			if `P'[`i',1] != floor(`P'[`i',1]) | `P'[`i',2] != floor(`P'[`i',2]) | `P'[`i',4] != floor(`P'[`i',4]) local fm "%10.2f"
+			di as txt %`w's abbrev("`lb'", `w') " {c |}" as res `fm' `P'[`i',1] `fm' `P'[`i',2] %10.2f `P'[`i',3] `fm' `P'[`i',4] %12.2f `P'[`i',5]
+		}
+		di as txt "{hline `=`w'+1'}{c BT}{hline 52}"
+		return matrix gof_`t' = `P'
+	}
+	di as txt "{p 0 0 2}Each simulated network is drawn from the model at one of `nsim' posterior draws (evenly spaced over the stored draws). MC p-value: 2 min(P(simulated <= observed), P(simulated >= observed)), at most 1, as in latentnet. Missing dyads of the observed network count as no tie.{p_end}"
+	if `valued' & !`normal' di as txt "{p 0 0 2}Degree, shared partners and distances are those of the network of the dyads with a positive value.{p_end}"
+	if "`plot'" != "" {
+		if "`name'" == "" local name "gof"
+		local panels
+		local np 0
+		foreach t in degree idegree odegree distance values {
+			local inw : list t in want
+			if !`inw' continue
+			local g "`g_`t''"
+			local ++np
+			local startval = cond("`t'" == "distance", 1, 0)
+			local ncell = rowsof(__lsmgof_q_`g')
+			* shown: the cells up to the last one with a positive observed or simulated share (at most maxdeg() + 1 or maxdist() cells if given)
+			mata: st_local("maxc", strofreal(max(selectindex(rowmax((abs(st_matrix("__lsmgof_q_`g'")[., 1]), st_matrix("__lsmgof_q_`g'")[., 6])) :> 0) \ 1)))
+			if "`t'" == "distance" & `maxdist' >= 0 local maxc = min(`maxc', `maxdist')
+			if inlist("`t'", "degree", "idegree", "odegree") & `maxdeg' >= 0 local maxc = min(`maxc', `maxdeg' + 1)
+			local lastlab = cond("`t'" == "distance", "NR", "`=`maxc'-1'")
+			_nwlsm_gofplot __lsmgof_q_`g' "`d_`t''" "panel`np'" `startval' `maxc' "`t'" `ncell' "`lastlab'"
+			local panels `panels' panel`np'
+		}
+		if `np' > 0 {
+			graph combine `panels', cols(`=min(`np', 2)') title("Goodness of fit: observed against `nsim' simulated networks", size(medium)) name(`name', replace)
+			foreach pn of local panels {
+				capture graph drop `pn'
+			}
+			di as txt "{p 0 0 2}(plot saved as {bf:`name'}; boxes and whiskers summarize the simulated networks, the red line with circles is the observed network){p_end}"
+		}
+	}
+	return scalar nsim = `nsim'
+	return scalar seed = `seed'
+	foreach m in deg ideg odeg esp dsp dist model val {
+		capture matrix drop __lsmgof_`m'
+		capture matrix drop __lsmgof_q_`m'
+	}
+	capture scalar drop __lsmgof_nsim
+end
+
+* one panel of the estat gof plot: observed share (red) and the box and whiskers of the simulated shares; matrix columns obs, min, p25, median, p75, max
+capture program drop _nwlsm_gofplot
+program _nwlsm_gofplot
+	args mat ttl graphname startval nshow stat ncell lastlab
+	preserve
+	quietly drop _all
+	quietly set obs `nshow'
+	tempname Q
+	matrix `Q' = `mat'
+	mata: st_store(., st_addvar("double", "observed"), st_matrix("`Q'")[1..`nshow', 1])
+	mata: st_store(., st_addvar("double", "ymin"), st_matrix("`Q'")[1..`nshow', 2])
+	mata: st_store(., st_addvar("double", "yp25"), st_matrix("`Q'")[1..`nshow', 3])
+	mata: st_store(., st_addvar("double", "ymedian"), st_matrix("`Q'")[1..`nshow', 4])
+	mata: st_store(., st_addvar("double", "yp75"), st_matrix("`Q'")[1..`nshow', 5])
+	mata: st_store(., st_addvar("double", "ymax"), st_matrix("`Q'")[1..`nshow', 6])
+	quietly gen xval = `startval' + _n - 1
+	local xlab
+	forvalues i = 1/`nshow' {
+		local v = `startval' + `i' - 1
+		local lb "`v'"
+		if "`stat'" == "distance" & `nshow' == `ncell' & `i' == `nshow' local lb "NR"
+		if "`stat'" == "values" & `i' == `nshow' & `nshow' == `ncell' local lb "`lastlab'+"
+		local xlab `"`xlab' `v' "`lb'""'
+	}
+	twoway (rcap ymin ymax xval, lcolor(gs10)) (rbar yp25 yp75 xval, barwidth(0.5) fcolor(gs14) lcolor(gs8)) ///
+		(scatter ymedian xval, mcolor(black) msymbol(diamond)) (connected observed xval, lcolor(red) mcolor(red) msymbol(circle) lwidth(medthin)), ///
+		xlabel(`xlab', angle(45) labsize(vsmall)) xtitle("`ttl'") ytitle("Proportion") title("`ttl'", size(small)) legend(off) nodraw name(`graphname', replace)
+	restore
+end
+
+* estat ppcheck: posterior predictive check of the tie probabilities (expected values): observed values against the posterior mean predictions
+capture program drop _nwlsm_ppcheck
+program _nwlsm_ppcheck, rclass
+	version 14
+	syntax [, GRoups(integer 10) GRAPH NAME(string) NOList]
+	if `groups' < 2 | `groups' > 50 {
+		di as error "groups() must be between 2 and 50"
+		exit 198
+	}
+	local fam "`e(family)'"
+	if "`fam'" == "" local fam "bernoulli"
+	local dir = ("`e(directed)'" == "directed")
+	capture mata: st_numscalar("__nwlsm_Sck", rows(LsmSample("beta")))
+	if _rc {
+		di as error "the posterior draws of the last fit are no longer in memory; fit the model again"
+		exit 498
+	}
+	scalar drop __nwlsm_Sck
+	tempname T SM
+	mata: LsmPPCheck(`groups', "`T'", "`SM'")
+	matrix colnames `T' = dyads predicted observed
+	local ng = rowsof(`T')
+	if "`nolist'" == "" {
+		di
+		di as text "Posterior predictive check: observed " cond("`fam'" == "bernoulli", "ties", "values") " against the posterior mean " cond("`fam'" == "bernoulli", "tie probabilities", "expected values") " (`fam' family)"
+		di as text "{hline 50}"
+		di as text %8s "Group" %12s "Dyads" %15s "Predicted" %15s "Observed"
+		di as text "{hline 50}"
+		forvalues i = 1/`ng' {
+			di as result %8.0f `i' %12.0f `T'[`i', 1] %15.4f `T'[`i', 2] %15.4f `T'[`i', 3]
+		}
+		di as text "{hline 50}"
+		di as text "Observed dyads: " as result %8.0f `SM'[1, 1] _c
+		if "`fam'" == "bernoulli" {
+			di as text "  Brier score: " as result %7.4f `SM'[1, 2] as text "  AUC: " as result %7.4f `SM'[1, 3] as text "  mean log loss: " as result %7.4f `SM'[1, 4]
+		}
+		else {
+			di as text "  RMSE: " as result %9.4f `SM'[1, 2] as text "  correlation: " as result %7.4f `SM'[1, 3] as text "  mean absolute error: " as result %9.4f `SM'[1, 4]
+		}
+		di as text "{p 0 0 2}Dyads are sorted by their posterior mean prediction and cut into `groups' groups of about equal size; a well calibrated model has the observed mean close to the predicted one in every group.{p_end}"
+	}
+	if "`graph'" != "" {
+		if "`name'" == "" local name "ppcheck"
+		preserve
+		quietly drop _all
+		quietly set obs `ng'
+		mata: st_store(., st_addvar("double", "predicted"), st_matrix("`T'")[., 2])
+		mata: st_store(., st_addvar("double", "observed"), st_matrix("`T'")[., 3])
+		quietly summarize predicted, meanonly
+		local lo = min(r(min), 0)
+		quietly summarize observed, meanonly
+		local lo = min(`lo', r(min))
+		local hi = max(r(max), 1e-9)
+		quietly summarize predicted, meanonly
+		local hi = max(`hi', r(max))
+		twoway (function y = x, range(`lo' `hi') lcolor(gs10) lpattern(dash)) (connected observed predicted, mcolor(navy) lcolor(navy) msymbol(circle)), ///
+			xtitle("Posterior mean prediction (group mean)") ytitle("Observed (group mean)") title("Posterior predictive check", size(medium)) legend(off) name(`name', replace)
+		restore
+	}
+	return matrix groups = `T'
+	return scalar N = `SM'[1, 1]
+	return scalar score = `SM'[1, 2]
+	return scalar auc_or_corr = `SM'[1, 3]
 end

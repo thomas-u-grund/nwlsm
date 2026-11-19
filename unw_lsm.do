@@ -23,6 +23,10 @@ capture mata: mata drop LsmNat()
 capture mata: mata drop lsm_geodesic()
 capture mata: mata drop lsm_mds()
 capture mata: mata drop lsm_start()
+capture mata: mata drop LsmGof()
+capture mata: mata drop LsmTraceMat()
+capture mata: mata drop LsmPPCheck()
+capture mata: mata drop lsm_gofsum()
 capture mata: mata drop lsm_vstart()
 capture mata: mata drop lsm_checkvalues()
 capture mata: mata drop lsm_priorvar()
@@ -95,6 +99,7 @@ class LsmNat {
 	void close()
 	void setup()
 	real colvector call()
+	void append()
 }
 
 void LsmNat::open()
@@ -137,6 +142,13 @@ void LsmNat::close()
 		stata("capture frame drop __nwlsm_native")
 		isopen = 0
 	}
+}
+
+// writes more numbers behind the model block (read by the goodness-of-fit call)
+void LsmNat::append(real colvector v)
+{
+	if (L + rows(v) > st_nobs()) st_addobs(L + rows(v) - st_nobs())
+	st_store((L + 1::L + rows(v)), 1, v)
 }
 
 // y: n x n (0/1, missing = .), X: (nc*n) x n, the covariate matrices stacked, d: dimension, prior: (scale, df, s2 start),
@@ -833,6 +845,11 @@ void LsmFit(real matrix y, real scalar dir, real matrix X, real scalar d, real s
 	external __nwlsm_beta, __nwlsm_llk, __nwlsm_s2, __nwlsm_Z, __nwlsm_D, __nwlsm_ZA, __nwlsm_ev, __nwlsm_E, __nwlsm_P, __nwlsm_MZ, __nwlsm_C, __nwlsm_K, __nwlsm_lam, __nwlsm_disp, __nwlsm_fam
 	__nwlsm_disp = DispD
 	__nwlsm_fam = fam
+	external __nwlsm_gY, __nwlsm_gX, __nwlsm_gT, __nwlsm_gm
+	__nwlsm_gY = y
+	__nwlsm_gX = X
+	__nwlsm_gT = tr
+	__nwlsm_gm = (dir, d, flags[1], flags[2], flags[3], flags[4], fam)
 	__nwlsm_beta = beta
 	__nwlsm_llk = llk
 	__nwlsm_s2 = S2
@@ -916,6 +933,191 @@ void LsmSaveDraws(string rowvector names, real rowvector act)
 		(void) st_addvar("double", "dispersion")
 		st_store(., "dispersion", __nwlsm_disp)
 	}
+}
+
+// summary matrix of one statistic: obs, min, mean, max, MC p-value (as latentnet: 2 min(P(sim <= obs), P(sim >= obs)), at most 1); rows: cells
+real matrix lsm_gofsum(real rowvector obs, real matrix sim)
+{
+	real matrix R
+	real scalar k, ns
+
+	ns = rows(sim)
+	R = J(cols(obs), 5, .)
+	for (k = 1; k <= cols(obs); k++) {
+		R[k, 1] = obs[k]
+		R[k, 2] = min(sim[., k])
+		R[k, 3] = mean(sim[., k])
+		R[k, 4] = max(sim[., k])
+		R[k, 5] = min((1, 2 * min((mean(sim[., k] :<= obs[k]), mean(sim[., k] :>= obs[k])))))
+	}
+	return(R)
+}
+
+// Goodness of fit: nsim networks simulated from posterior draws (evenly spaced over the stored draws), the statistics of the groups in mask
+// (bits: 1 degree or in-degree, 2 out-degree, 4 edgewise shared partners, 8 dyadwise shared partners, 16 geodesic distances, 32 model statistics,
+// 64 tie values) for the observed and the simulated networks. Fills the Stata matrices <nm>_<group> (cells x 5: observed, min, mean, max, MC p-value)
+// and <nm>_q_<group> (cells x 6: observed share, min, 25%, median, 75%, max of the share over the simulations).
+void LsmGof(real scalar nsim, real scalar seed, real scalar mask, real scalar threads, real scalar M, string scalar nm)
+{
+	class LsmNat scalar N
+	real scalar n, nc, K, d, dir, fam, S, na, k, t, RW, m, ncut, j, off, w, g
+	real matrix Dr, E, out, Sm, Q, X, y, tr
+	real rowvector flags, act, w7, idx, cuts, ob
+	real colvector yv, res, srt
+	external __nwlsm_beta, __nwlsm_Z, __nwlsm_E, __nwlsm_disp, __nwlsm_gY, __nwlsm_gX, __nwlsm_gT, __nwlsm_gm
+	string rowvector grp
+
+	y = __nwlsm_gY
+	X = __nwlsm_gX
+	tr = __nwlsm_gT
+	n = rows(y)
+	nc = rows(X) / n
+	K = nc + 1
+	dir = __nwlsm_gm[1]
+	d = __nwlsm_gm[2]
+	flags = __nwlsm_gm[3..6]
+	fam = __nwlsm_gm[7]
+	act = flags[1..3]
+	na = sum(act)
+	S = rows(__nwlsm_beta)
+	if (nsim > S) nsim = S
+	idx = (nsim == 1 ? 1 : round(1 :+ (0..(nsim - 1)) * (S - 1) / (nsim - 1)))
+	Dr = __nwlsm_beta[idx', .], __nwlsm_Z[idx', .]
+	for (t = 1; t <= 3; t++) if (act[t]) Dr = Dr, __nwlsm_E[idx', ((t - 1) * n + 1)..(t * n)]
+	Dr = Dr, (fam == 3 ? __nwlsm_disp[idx'] : J(nsim, 1, 0))
+	cuts = J(1, 0, .)
+	ncut = 0
+	if (fam == 3 & mod(floor(mask / 64), 2) == 1) {
+		// off-diagonal values of the observed network (undirected: each tie once)
+		yv = J(0, 1, .)
+		for (j = 1; j <= n; j++) {
+			if (dir) yv = yv \ select(y[j, .]', (y[j, .]' :< .) :& ((1::n) :!= j))
+			else if (j < n) yv = yv \ select(y[j, (j + 1)..n]', y[j, (j + 1)..n]' :< .)
+		}
+		srt = sort(yv, 1)
+		cuts = J(1, 9, .)
+		for (k = 1; k <= 9; k++) cuts[k] = srt[max((1, ceil(k * rows(srt) / 10)))]
+		ncut = 9
+	}
+	N.open()
+	N.setup(y, dir, X, d, (1, 1, 1), J(1, K, 9), J(1, K, 0), J(n, d, 0), flags, (1, 1, 1 \ 1, 1, 1 \ 1, 1, 1), J(n, 3, 0), J(1, 5, 0), (fam, 1, 1, (fam == 3 ? 1 : 0)), tr)
+	N.append(cuts' \ vec(Dr'))
+	w7 = J(1, 7, 0)
+	if (mod(floor(mask / 1), 2) == 1) w7[1] = n
+	if (mod(floor(mask / 2), 2) == 1) w7[2] = n
+	if (mod(floor(mask / 4), 2) == 1) w7[3] = n - 1
+	if (mod(floor(mask / 8), 2) == 1) w7[4] = n - 1
+	if (mod(floor(mask / 16), 2) == 1) w7[5] = n
+	if (mod(floor(mask / 32), 2) == 1) w7[6] = 1 + nc
+	if (mod(floor(mask / 64), 2) == 1) w7[7] = (fam == 3 ? ncut + 1 : M + 1)
+	RW = sum(w7)
+	res = N.call(sprintf("20 %f %f %f %f %f %f %f", N.L, nsim, seed, threads, mask, M, ncut), (nsim + 1) * RW)
+	N.close()
+	if (hasmissing(res)) {
+		errprintf("nwlsm: the simulation returned missing values\n")
+		exit(498)
+	}
+	out = colshape(res, RW)
+	grp = ("deg", "odeg", "esp", "dsp", "dist", "model", "val")
+	if (dir) grp[1] = "ideg"
+	off = 0
+	for (g = 1; g <= 7; g++) {
+		w = w7[g]
+		if (w == 0) continue
+		ob = out[1, (off + 1)..(off + w)]
+		Sm = out[2..(nsim + 1), (off + 1)..(off + w)]
+		st_matrix(nm + "_" + grp[g], lsm_gofsum(ob, Sm))
+		if (g != 6) {
+			Q = Sm :/ (rowsum(Sm) :+ (rowsum(Sm) :== 0))
+			ob = ob / max((sum(ob), 1))
+			Q = Q'
+			Q = ob', rowmin(Q), J(w, 1, .), J(w, 1, .), J(w, 1, .), rowmax(Q)
+			for (k = 1; k <= w; k++) {
+				srt = sort(Sm[., k] :/ (rowsum(Sm) :+ (rowsum(Sm) :== 0)), 1)
+				Q[k, 3] = srt[max((1, ceil(0.25 * nsim)))]
+				Q[k, 4] = srt[max((1, ceil(0.5 * nsim)))]
+				Q[k, 5] = srt[max((1, ceil(0.75 * nsim)))]
+			}
+			st_matrix(nm + "_q_" + grp[g], Q)
+		}
+		off = off + w
+	}
+	st_numscalar(nm + "_nsim", nsim)
+}
+
+// Posterior predictive check of the expected values: observed dyads (undirected: each once) sorted by the posterior mean prediction and cut into
+// G groups of about equal size: (dyads, mean predicted, mean observed) per group in tn; summary in sn: (dyads, Brier score or RMSE, AUC or correlation,
+// mean log loss or mean absolute error).
+void LsmPPCheck(real scalar G, string scalar tn, string scalar sn)
+{
+	external __nwlsm_P, __nwlsm_gY, __nwlsm_gm
+	real matrix Y, P
+	real colvector yv, pv, ord, r1, r0
+	real scalar n, dir, fam, i, j, g, lo, hi, m, ng, auc, n1, n0, t, br
+	real matrix T
+
+	Y = __nwlsm_gY
+	P = __nwlsm_P
+	n = rows(Y)
+	dir = __nwlsm_gm[1]
+	fam = __nwlsm_gm[7]
+	yv = J(0, 1, .)
+	pv = J(0, 1, .)
+	for (i = 1; i <= n; i++) for (j = 1; j <= n; j++) {
+		if (i == j | (!dir & j < i) | Y[i, j] >= .) continue
+		yv = yv \ Y[i, j]
+		pv = pv \ P[i, j]
+	}
+	m = rows(yv)
+	ord = order(pv, 1)
+	yv = yv[ord]
+	pv = pv[ord]
+	ng = min((G, m))
+	T = J(ng, 3, .)
+	for (g = 1; g <= ng; g++) {
+		lo = floor((g - 1) * m / ng) + 1
+		hi = floor(g * m / ng)
+		T[g, .] = (hi - lo + 1, mean(pv[lo..hi]), mean(yv[lo..hi]))
+	}
+	st_matrix(tn, T)
+	if (fam == 0) {
+		br = mean((yv - pv) :^ 2)
+		// AUC by ranks (ties get mid ranks)
+		r1 = J(m, 1, .)
+		i = 1
+		while (i <= m) {
+			j = i
+			while (j < m) {
+				if (pv[j + 1] != pv[i]) break
+				j++
+			}
+			r1[i..j] = J(j - i + 1, 1, (i + j) / 2)
+			i = j + 1
+		}
+		n1 = sum(yv :== 1)
+		n0 = m - n1
+		auc = .
+		if (n1 > 0 & n0 > 0) auc = (sum(select(r1, yv :== 1)) - n1 * (n1 + 1) / 2) / (n1 * n0)
+		st_matrix(sn, (m, br, auc, -mean(yv :* ln(pv :+ (pv :== 0) * 1e-300) + (1 :- yv) :* ln(1 :- pv :+ (pv :== 1) * 1e-300))))
+	}
+	else {
+		auc = .
+		if (variance(yv)[1, 1] > 0 & variance(pv)[1, 1] > 0) auc = correlation((yv, pv))[1, 2]
+		st_matrix(sn, (m, sqrt(mean((yv - pv) :^ 2)), auc, mean(abs(yv - pv))))
+	}
+}
+
+// the draws of the coefficients, the log likelihood and the variance parameters (columns in the order of the rows of estat mcmcdiag), chains one after the other
+real matrix LsmTraceMat(real rowvector act)
+{
+	external __nwlsm_beta, __nwlsm_llk, __nwlsm_s2, __nwlsm_ev, __nwlsm_disp, __nwlsm_fam
+	real matrix M
+	real scalar t
+
+	M = (__nwlsm_beta, __nwlsm_llk, __nwlsm_s2)
+	for (t = 1; t <= 3; t++) if (act[t]) M = (M, __nwlsm_ev[., t])
+	if (__nwlsm_fam == 3) M = (M, __nwlsm_disp)
+	return(M)
 }
 
 // test helper: the plugin's log likelihood and log prior of Z at (beta, Z, s2), and its incremental log-likelihood change
