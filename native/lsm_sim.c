@@ -87,6 +87,7 @@ typedef struct {
 	double cscale, cdf, cmv, calpha; /* latent clusters: prior scale and df of the cluster variances, variance of the cluster means, Dirichlet parameter */
 	int act[3];
 	double scale, df, s2;
+	int mthr; /* threads inside the MKL objective */
 	double rz, re[3]; /* weak ridge of the MKL fit: precisions of the positions and of the effects */
 	double es[3], edf[3], ev0[3];
 	double *pvar, *beta, *Z, *x, *e0; /* x: nc blocks of n*n; e0: 3 blocks of n */
@@ -138,9 +139,33 @@ static inline double latt(int lt, int d, const double *a, const double *b) {
 	return -s;
 }
 
+/* ---- threads: no Stata plugin interface call is made from a worker thread ---- */
+typedef struct { void (*fn)(void *, int); void *ctx; int tid, T, count; } PJob;
+static LSM_THREAD_FN pworker(void *a) {
+	PJob *j = (PJob *)a; int k;
+	for (k = j->tid; k < j->count; k += j->T) j->fn(j->ctx, k);
+	LSM_THREAD_RET;
+}
+/* runs fn(ctx, 0..count-1) on up to T threads (the calling thread is thread 0); the work items are independent, so the result does not depend on T */
+static void par_run(int T, int count, void (*fn)(void *, int), void *ctx) {
+	int k; PJob *jobs; lsm_thread *th; char *started;
+	if (T > count) T = count;
+	if (T > 256) T = 256;
+	if (T < 1) T = 1;
+	jobs = calloc(T, sizeof(PJob)); th = calloc(T, sizeof(lsm_thread)); started = calloc(T, 1);
+	if (!jobs || !th || !started) { free(jobs); free(th); free(started); for (k = 0; k < count; k++) fn(ctx, k); return; }
+	for (k = 0; k < T; k++) { jobs[k].fn = fn; jobs[k].ctx = ctx; jobs[k].tid = k; jobs[k].T = T; jobs[k].count = count; }
+	for (k = 1; k < T; k++) started[k] = (thread_start(&th[k], pworker, &jobs[k]) == 0);
+	(void)pworker(&jobs[0]);
+	for (k = 1; k < T; k++) { if (started[k]) thread_join(th[k]); else (void)pworker(&jobs[k]); }
+	free(jobs); free(th); free(started);
+}
+
+
 typedef struct {
 	const Model *g;
 	double *beta, *Z, *eff[3], *lin, *D, *L, *tmpD, *tmpL, *tmpL2;
+	int thr; /* threads for the per-dyad passes of this chain (beta updates) */
 } State;
 
 static int state_alloc(State *s, const Model *g) {
@@ -237,30 +262,42 @@ static void eff_commit(State *s, int t, int i, double delta) {
 	s->eff[t][i] += delta;
 }
 
+/* The passes over all dyads (beta updates) are cut into NBLK blocks of rows; the partial sums are added in block order, so the result does not
+   depend on the number of threads (the blocks may run on several threads). */
+#define NBLK 16
+typedef struct { State *s; int k, nb; double delta; double *newL; int commit; double part[NBLK]; } BJob;
+static void beta_blk(void *ctx, int b) {
+	BJob *J = (BJob *)ctx; State *s = J->s; const Model *g = s->g; int n = g->n, i, j, k = J->k;
+	int lo = (int)((long)b * n / J->nb), hi = (int)((long)(b + 1) * n / J->nb);
+	const double *xk = k > 0 ? g->x + (size_t)(k - 1) * n * n : NULL;
+	double dll = 0.0, delta = J->delta;
+	for (i = lo; i < hi; i++) for (j = g->dir ? 0 : i + 1; j < n; j++) {
+		size_t ij = (size_t)i * n + j;
+		if (i == j) continue;
+		if (J->commit) {
+			double dv = delta * (xk ? xk[ij] : 1.0);
+			s->lin[ij] += dv;
+			if (g->y[ij] >= 0) s->L[ij] = J->newL[ij];
+			if (!g->dir) { size_t ji = (size_t)j * n + i; s->lin[ji] = s->lin[ij]; s->L[ji] = s->L[ij]; }
+		} else {
+			double nl;
+			if (g->y[ij] < 0) { J->newL[ij] = 0; continue; }
+			nl = llterm(g->y[ij], s->lin[ij] + delta * (xk ? xk[ij] : 1.0) - s->D[ij]);
+			J->newL[ij] = nl; dll += nl - s->L[ij];
+		}
+	}
+	J->part[b] = dll;
+}
+static void beta_pass(State *s, int k, double delta, double *newL, int commit, double *dll) {
+	BJob J; int b, nb = s->g->n < NBLK ? s->g->n : NBLK;
+	J.s = s; J.k = k; J.delta = delta; J.newL = newL; J.commit = commit; J.nb = nb;
+	if (s->thr > 1) par_run(s->thr, nb, beta_blk, &J);
+	else for (b = 0; b < nb; b++) beta_blk(&J, b);
+	if (dll) { *dll = 0.0; for (b = 0; b < nb; b++) *dll += J.part[b]; }
+}
 /* log likelihood difference for beta_k -> beta_k + delta (full pass); newL receives the new terms */
-static double beta_dll(State *s, int k, double delta, double *newL) {
-	const Model *g = s->g; int n = g->n, i, j; double dll = 0.0;
-	const double *xk = k > 0 ? g->x + (size_t)(k - 1) * n * n : NULL;
-	for (i = 0; i < n; i++) for (j = g->dir ? 0 : i + 1; j < n; j++) {
-		double nl;
-		if (i == j) continue;
-		if (g->y[i * n + j] < 0) { newL[i * n + j] = 0; continue; }
-		nl = llterm(g->y[i * n + j], s->lin[i * n + j] + delta * (xk ? xk[i * n + j] : 1.0) - s->D[i * n + j]);
-		newL[i * n + j] = nl; dll += nl - s->L[i * n + j];
-	}
-	return dll;
-}
-static void beta_commit(State *s, int k, double delta, const double *newL) {
-	const Model *g = s->g; int n = g->n, i, j;
-	const double *xk = k > 0 ? g->x + (size_t)(k - 1) * n * n : NULL;
-	s->beta[k] += delta;
-	for (i = 0; i < n; i++) for (j = 0; j < n; j++) {
-		if (i == j) continue;
-		if (!g->dir && j < i) { s->lin[i * n + j] = s->lin[j * n + i]; s->L[i * n + j] = s->L[j * n + i]; continue; }
-		s->lin[i * n + j] += delta * (xk ? xk[i * n + j] : 1.0);
-		if (g->dir || j > i) s->L[i * n + j] = newL[i * n + j];
-	}
-}
+static double beta_dll(State *s, int k, double delta, double *newL) { double d; beta_pass(s, k, delta, newL, 0, &d); return d; }
+static void beta_commit(State *s, int k, double delta, const double *newL) { beta_pass(s, k, delta, (double *)newL, 1, NULL); s->beta[k] += delta; }
 
 /* ---- minimum Kullback-Leibler estimate ---- */
 /* x = [Z (n d) | beta (K) | active effects (n each)];  f = sum over observed dyads of EY eta - log(1 + exp(eta)), gradient into grad (if not NULL) */
@@ -269,16 +306,16 @@ static void mkl_unpack(const Model *g, const double *x, const double **Z, const 
 	*Z = x; *beta = x + off; off += g->K;
 	for (t = 0; t < 3; t++) { eff[t] = NULL; if (g->act[t]) { eff[t] = x + off; off += g->n; } }
 }
-static double mkl_fg(const Model *g, const double *EY, const double *x, double *grad, int P) {
-	const double *Z, *beta, *eff[3];
-	int n = g->n, d = g->d, i, j, k, t, goff; double f = 0.0;
-	mkl_unpack(g, x, &Z, &beta, eff);
-	goff = n * d;
-	if (grad) for (k = 0; k < P; k++) grad[k] = 0.0;
-	for (i = 0; i < n; i++) for (j = g->dir ? 0 : i + 1; j < n; j++) {
+typedef struct { const Model *g; const double *EY, *Z, *beta, *const *eff; double *pf, *pg; int P, goff, nb, grad; } MFJob;
+static void mkl_blk(void *ctx, int b) {
+	MFJob *J = (MFJob *)ctx; const Model *g = J->g; int n = g->n, d = g->d, i, j, k, t, goff = J->goff;
+	int lo = (int)((long)b * n / J->nb), hi = (int)((long)(b + 1) * n / J->nb);
+	const double *Z = J->Z, *EY = J->EY; double *grad = J->grad ? J->pg + (size_t)b * J->P : NULL, f = 0.0;
+	if (grad) for (k = 0; k < J->P; k++) grad[k] = 0.0;
+	for (i = lo; i < hi; i++) for (j = g->dir ? 0 : i + 1; j < n; j++) {
 		double eta, lt, ge, dd;
 		if (i == j || g->y[i * n + j] < 0) continue;
-		eta = linpred(g, beta, eff, i, j);
+		eta = linpred(g, J->beta, J->eff, i, j);
 		lt = latt(g->lt, d, Z + i * d, Z + j * d);
 		eta -= lt;
 		f += EY[i * n + j] * eta - log1pexp(eta);
@@ -297,6 +334,20 @@ static double mkl_fg(const Model *g, const double *EY, const double *x, double *
 			for (k = 0; k < d; k++) { grad[i * d + k] += ge * Z[j * d + k]; grad[j * d + k] += ge * Z[i * d + k]; }
 		}
 	}
+	J->pf[b] = f;
+}
+static double mkl_fg(const Model *g, const double *EY, const double *x, double *grad, int P) {
+	const double *Z, *beta, *eff[3];
+	int n = g->n, d = g->d, k, t, goff, b, nb = n < NBLK ? n : NBLK; double f = 0.0, pf[NBLK], *pg = NULL;
+	MFJob J;
+	mkl_unpack(g, x, &Z, &beta, eff);
+	goff = n * d;
+	if (grad) { for (k = 0; k < P; k++) grad[k] = 0.0; pg = malloc(sizeof(double) * (size_t)P * nb); if (!pg) return -1e300; }
+	J.g = g; J.EY = EY; J.Z = Z; J.beta = beta; J.eff = (const double *const *)eff; J.pf = pf; J.pg = pg; J.P = P; J.goff = goff; J.nb = nb; J.grad = grad != NULL;
+	if (g->mthr > 1) par_run(g->mthr, nb, mkl_blk, &J);
+	else for (b = 0; b < nb; b++) mkl_blk(&J, b);
+	for (b = 0; b < nb; b++) { f += pf[b]; if (grad) for (k = 0; k < P; k++) grad[k] += pg[(size_t)b * P + k]; }
+	free(pg);
 	if (g->rz > 0.0) {
 		f -= 0.5 * g->rz * sumsq(Z, n * d);
 		if (grad) for (k = 0; k < n * d; k++) grad[k] -= g->rz * Z[k];
@@ -493,30 +544,8 @@ static void clu_gibbs(Rng *r, const Model *g, const double *Z, Clu *c) {
 	free(sm);
 }
 
-/* ---- threads: no Stata plugin interface call is made from a worker thread ---- */
-typedef struct { void (*fn)(void *, int); void *ctx; int tid, T, count; } PJob;
-static LSM_THREAD_FN pworker(void *a) {
-	PJob *j = (PJob *)a; int k;
-	for (k = j->tid; k < j->count; k += j->T) j->fn(j->ctx, k);
-	LSM_THREAD_RET;
-}
-/* runs fn(ctx, 0..count-1) on up to T threads (the calling thread is thread 0); the work items are independent, so the result does not depend on T */
-static void par_run(int T, int count, void (*fn)(void *, int), void *ctx) {
-	int k; PJob *jobs; lsm_thread *th; char *started;
-	if (T > count) T = count;
-	if (T > 256) T = 256;
-	if (T < 1) T = 1;
-	jobs = calloc(T, sizeof(PJob)); th = calloc(T, sizeof(lsm_thread)); started = calloc(T, 1);
-	if (!jobs || !th || !started) { free(jobs); free(th); free(started); for (k = 0; k < count; k++) fn(ctx, k); return; }
-	for (k = 0; k < T; k++) { jobs[k].fn = fn; jobs[k].ctx = ctx; jobs[k].tid = k; jobs[k].T = T; jobs[k].count = count; }
-	for (k = 1; k < T; k++) started[k] = (thread_start(&th[k], pworker, &jobs[k]) == 0);
-	(void)pworker(&jobs[0]);
-	for (k = 1; k < T; k++) { if (started[k]) thread_join(th[k]); else (void)pworker(&jobs[k]); }
-	free(jobs); free(th); free(started);
-}
-
 /* ---- one chain ---- */
-typedef struct { int S, burn, intv, pil, plen; double dz, db, de, tgt; } Cfg;
+typedef struct { int S, burn, intv, pil, plen, ithr, mthr; double dz, db, de, tgt; } Cfg;
 typedef struct {
 	double *dBeta, *dLlk, *dS2, *dEv, *dZ, *dE, *dMu, *dLam, *dK; /* slices of the pooled draw arrays (draw-major) */
 	double *Dsum, *EYsum;                                          /* own, n x n */
@@ -539,6 +568,7 @@ static void chain_run(void *ctx, int idx) {
 	o->Dsum = calloc((size_t)n * n, sizeof(double)); o->EYsum = calloc((size_t)n * n, sizeof(double));
 	if (!db || !newL || !o->Dsum || !o->EYsum || !state_alloc(&s, gp) || !clu_alloc(&cl, gp)) { o->rc = 909; goto done; }
 	rng_seed(&rg, J->seed);
+	s.thr = cf->ithr;
 	memcpy(s.beta, g.beta, sizeof(double) * K); memcpy(s.Z, g.Z, sizeof(double) * nd);
 	for (t = 0; t < 3; t++) memcpy(s.eff[t], g.e0 + (long)t * n, sizeof(double) * n);
 	if (J->seed != J->o->seed0) { /* chains after the first start from over-dispersed positions */
@@ -661,6 +691,11 @@ static int run_chains(const Model *gp, long L) {
 	if (Sc < 1 || cf.intv < 1 || cf.burn < 0 || cf.pil < 0 || cf.plen < 1 || cf.dz <= 0 || cf.db <= 0 || cf.tgt <= 0 || cf.tgt >= 1 || cf.de <= 0 || a[10] < 1 || C < 1 || C > 256 || T < 0) { SF_error("lsm_sim: bad chain settings\n"); return 198; }
 	S = (long)Sc * C;
 	if (T == 0) T = ncores();
+	{ /* threads: the chains first; threads left over (more threads than chains) work inside a chain on the per-dyad passes, if the network is large enough to pay for it */
+	  int act = C < T ? C : T, inner = T / act, cap = (int)(((long)n * n) / 10000);
+	  if (cap < 1) cap = 1;
+	  cf.ithr = inner < cap ? inner : cap; if (cf.ithr > NBLK) cf.ithr = NBLK;
+	}
 	outs = calloc(C, sizeof(COut)); jobs = calloc(C, sizeof(CJob));
 	pBeta = malloc(sizeof(double) * S * K); pLlk = malloc(sizeof(double) * S); pS2 = malloc(sizeof(double) * S * ng); pEv = malloc(sizeof(double) * S * 3);
 	pZ = malloc(sizeof(double) * S * nd); pE = malloc(sizeof(double) * S * 3 * n);
@@ -683,7 +718,7 @@ static int run_chains(const Model *gp, long L) {
 		Model gm = g; KLJob kj; MKJob mj;
 		for (dr = 0; dr < S; dr++) { for (k = 0; k < ng; k++) ms2 += pS2[dr * ng + k] / ((double)S * ng); for (t = 0; t < 3; t++) mev[t] += pEv[dr * 3 + t] / (double)S; }
 		/* a very weak ridge (1/1000 of the posterior precision) keeps the optimiser from running away along flat directions */
-		gm.rz = 1e-3 / ms2; for (t = 0; t < 3; t++) gm.re[t] = g.act[t] ? 1e-3 / mev[t] : 0.0;
+		gm.mthr = 1; gm.rz = 1e-3 / ms2; for (t = 0; t < 3; t++) gm.re[t] = g.act[t] ? 1e-3 / mev[t] : 0.0;
 		kls = malloc(sizeof(double) * S);
 		if (!kls) { SF_error("lsm_sim: not enough memory\n"); rc = 909; goto cleanup; }
 		nblk = S < 64 ? (int)S : 64;
@@ -699,6 +734,8 @@ static int run_chains(const Model *gp, long L) {
 			kls[b] = 1e300; sel[c] = b;
 		}
 		mj.gm = &gm; mj.EY = EY; mj.dBeta = pBeta; mj.dE = pE; mj.dZ = pZ; mj.sel = sel; mj.xs = xs; mj.fo = fo; mj.its = its; mj.S = (int)S;
+		{ int inner = T / (ms < T ? ms : T), cap = (int)(((long)n * n) / 10000);
+		  if (cap < 1) cap = 1; gm.mthr = inner < cap ? inner : cap; if (gm.mthr > NBLK) gm.mthr = NBLK; }
 		par_run(T, ms, mkl_start, &mj);
 		{ int have = 0, cbest = 0;
 		  for (c = 0; c < ms; c++) if (!have || fo[c] > fbest) { have = 1; fbest = fo[c]; itbest = its[c]; cbest = c; bi = sel[c]; }
