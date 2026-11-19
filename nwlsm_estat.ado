@@ -36,6 +36,10 @@ program nwlsm_estat, rclass
 		_nwlsm_ppcheck `rest'
 		return add
 	}
+	else if "`subcmd'" == "bic" {
+		_nwlsm_bic `rest'
+		return add
+	}
 	else {
 		di as err "estat `subcmd' not allowed after nwlsm"
 		exit 321
@@ -755,4 +759,88 @@ program _nwlsm_influence, rclass
 	return scalar eff_neighbors = `effn'
 	capture mata: mata drop __nwlsm_x
 	return matrix exerted = `EX'
+end
+
+* estat bic: the BIC of the latent position model as latentnet's bic.ergmm (computed at the minimum Kullback-Leibler positions and effects)
+capture program drop _nwlsm_bic
+program _nwlsm_bic, rclass
+	version 14
+	syntax [, EFFobs(string) NOList]
+	if "`e(family)'" != "bernoulli" & "`e(family)'" != "" {
+		di as error "estat bic is available for binary networks (family bernoulli) only"
+		exit 198
+	}
+	if "`e(latent)'" == "bilinear" {
+		di as error "estat bic is not available for the bilinear model"
+		exit 198
+	}
+	if "`e(influence)'" == "yes" {
+		di as error "estat bic is not available for the influence model"
+		exit 198
+	}
+	capture mata: st_numscalar("__nwlsm_Sck", rows(LsmSample("beta")))
+	if _rc {
+		di as error "the posterior draws of the last fit are no longer in memory; fit the model again"
+		exit 498
+	}
+	scalar drop __nwlsm_Sck
+	local eff 0
+	local effname "ties"
+	if "`effobs'" != "" {
+		local effname = lower("`effobs'")
+		local n = e(N_nodes)
+		local dir = ("`e(directed)'" == "directed")
+		if "`effname'" == "ties" local eff 0
+		else if "`effname'" == "dyads" local eff = cond(`dir', `n' * (`n' - 1), `n' * (`n' - 1) / 2)
+		else if "`effname'" == "actors" local eff `n'
+		else {
+			di as error "effobs() must be ties, dyads or actors"
+			exit 198
+		}
+	}
+	tempname E R
+	local n = e(N_nodes)
+	capture matrix `E' = e(mkl_effects)
+	if _rc {
+		capture confirm matrix e(Z)
+		if _rc {
+			di as error "the minimum Kullback-Leibler estimates were not stored (too many actors for a Stata matrix)"
+			exit 498
+		}
+		matrix `E' = J(`n', 3, 0)
+	}
+	local G = e(clusters)
+	local effl `e(effects)'
+	mata: st_matrix("`R'", LsmBicFit(st_matrix("`E'"), `G', `eff'))
+	matrix colnames `R' = Y Z sender receiver sociality overall p loglik Gused effobs
+	local ob = `R'[1, 6]
+	if "`nolist'" == "" {
+		di
+		di as text "BIC of the latent position model (as latentnet's bic.ergmm, at the minimum Kullback-Leibler estimates)"
+		di as text "{hline 44}"
+		di as text %-24s "Component" %20s "BIC"
+		di as text "{hline 44}"
+		di as text %-24s "Ties given positions (Y)" as result %20.3f `R'[1, 1]
+		di as text %-24s "Positions (Z)" as result %20.3f `R'[1, 2]
+		foreach t in sender receiver sociality {
+			local k = cond("`t'" == "sender", 3, cond("`t'" == "receiver", 4, 5))
+			if `: list t in effl' di as text %-24s "Random effect: `t'" as result %20.3f `R'[1, `k']
+		}
+		di as text "{hline 44}"
+		di as text %-24s "Overall" as result %20.3f `ob'
+		di as text "{hline 44}"
+		di as text "Latent clusters: " as result `G' as text "; coefficients: " as result `R'[1, 7] as text "; effective number of observations (" "`effname'" "): " as result `R'[1, 10]
+		di as text "{p 0 0 2}Smaller is better. The BIC compares models fitted to the same network; it is not certain that it is appropriate for choosing the dimension, the random effects or between a clustered and an unclustered model.{p_end}"
+	}
+	return scalar bic = `ob'
+	return scalar bic_y = `R'[1, 1]
+	return scalar bic_z = `R'[1, 2]
+	return scalar bic_sender = `R'[1, 3]
+	return scalar bic_receiver = `R'[1, 4]
+	return scalar bic_sociality = `R'[1, 5]
+	return scalar p = `R'[1, 7]
+	return scalar loglik_mle = `R'[1, 8]
+	return scalar effobs = `R'[1, 10]
+	return scalar clusters_used = `R'[1, 9]
+	return matrix components = `R'
 end

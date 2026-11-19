@@ -51,6 +51,11 @@ capture mata: mata drop LsmCheckInfl()
 capture mata: mata drop lsm_ztrans()
 capture mata: mata drop LsmPlotPrep()
 capture mata: mata drop LsmPlotStore()
+capture mata: mata drop LsmBic()
+capture mata: mata drop LsmBicFit()
+capture mata: mata drop lsm_condmle()
+capture mata: mata drop lsm_kmeans()
+capture mata: mata drop lsm_em_vii()
 
 mata:
 mata set matastrict off
@@ -1315,6 +1320,221 @@ void LsmPlotStore()
 	st_store((1::n), ("x", "y", "cg", "w"), __nwlsm_pd)
 	st_sstore((1::n), "lb", __nwlsm_lb)
 	if (m > 0) st_store((n + 1::n + m), ("ex1", "ey1", "ex2", "ey2"), __nwlsm_ed)
+}
+
+// ---- BIC of the latent position model as latentnet's bic.ergmm (latentnet 2.12.0) ----
+// log-likelihood of the Bernoulli tie model at the maximum over the coefficients for fixed positions and effects (Newton with step halving);
+// y: n x n, X: stacked covariates (n nc x n), off: n x n offset (minus the distance plus the effects). Returns (lpY, beta).
+real rowvector lsm_condmle(real matrix y, real scalar dir, real matrix X, real matrix off)
+{
+	real scalar n, nc, K, i, j, m, k, it, ll, ll1, st, ok
+	real colvector yv, ov, eta, p, beta, g, nb, ho
+	real matrix Xd, H
+
+	n = rows(y)
+	nc = rows(X) / n
+	K = nc + 1
+	yv = J(0, 1, .)
+	ov = J(0, 1, .)
+	Xd = J(0, K, .)
+	for (i = 1; i <= n; i++) for (j = 1; j <= n; j++) {
+		if (i == j | (!dir & j < i) | y[i, j] >= .) continue
+		yv = yv \ y[i, j]
+		ov = ov \ off[i, j]
+		Xd = Xd \ (1, (nc > 0 ? X[i :+ n * (0..(nc - 1)), j]' : J(1, 0, .)))
+	}
+	m = rows(yv)
+	beta = J(K, 1, 0)
+	eta = ov
+	ll = sum(yv :* eta - (eta :* (eta :> 0) + ln(1 :+ exp(-abs(eta)))))
+	for (it = 1; it <= 100; it++) {
+		p = 1 :/ (1 :+ exp(-eta))
+		g = cross(Xd, yv - p)
+		H = cross(Xd, p :* (1 :- p), Xd)
+		ho = cholinv(H + 1e-12 * I(K)) * g
+		st = 1
+		ok = 0
+		for (k = 1; k <= 30; k++) {
+			nb = beta + st * ho
+			eta = ov + Xd * nb
+			ll1 = sum(yv :* eta - (eta :* (eta :> 0) + ln(1 :+ exp(-abs(eta)))))
+			if (ll1 >= ll - 1e-12) {
+				ok = 1
+				break
+			}
+			st = st / 2
+		}
+		if (!ok) break
+		beta = nb
+		if (abs(ll1 - ll) < 1e-12 * (1 + abs(ll))) {
+			ll = ll1
+			break
+		}
+		ll = ll1
+	}
+	return((ll, beta'))
+}
+
+// k-means (Lloyd, nstart random starts from data points); returns the cluster of every row, the centres, the within sums of squares
+void lsm_kmeans(real matrix Z, real scalar G, real scalar nstart, real colvector cl, real matrix C, real colvector wss)
+{
+	real scalar n, d, s, it, g, best, i
+	real colvector cl0, cl1, wss1, idx, w
+	real matrix C1, DM
+
+	n = rows(Z)
+	d = cols(Z)
+	best = .
+	for (s = 1; s <= nstart; s++) {
+		idx = order(runiform(n, 1), 1)[1::G]
+		C1 = Z[idx, .]
+		cl1 = J(n, 1, 0)
+		for (it = 1; it <= 100; it++) {
+			DM = J(n, G, 0)
+			for (g = 1; g <= G; g++) DM[., g] = rowsum((Z :- C1[g, .]) :^ 2)
+			cl0 = cl1
+			cl1 = J(n, 1, .)
+			for (i = 1; i <= n; i++) {
+				minindex(DM[i, .], 1, w, idx)
+				cl1[i] = w[1]
+			}
+			if (all(cl1 :== cl0)) break
+			for (g = 1; g <= G; g++) if (any(cl1 :== g)) C1[g, .] = mean(select(Z, cl1 :== g))
+		}
+		wss1 = J(G, 1, 0)
+		for (g = 1; g <= G; g++) wss1[g] = sum((select(Z, cl1 :== g) :- C1[g, .]) :^ 2)
+		if (best >= . | sum(wss1) < best) {
+			best = sum(wss1)
+			cl = cl1
+			C = C1
+			wss = wss1
+		}
+	}
+}
+
+// EM for a mixture of G spherical normals with their own variances (latentnet's mbc.VII.EM); returns the log likelihood (missing if the fit failed)
+real scalar lsm_em_vii(real matrix Z, real scalar G)
+{
+	real scalar n, d, att, it, g, dm, llk, tol, ok
+	real colvector pK, v, cl, wss, sz, tot, pK1, v1
+	real matrix mu, pz, lg, mu1
+	transmorphic rs
+
+	n = rows(Z)
+	d = cols(Z)
+	tol = sqrt(epsilon(1))
+	rs = rngstate()
+	rseed(20261119)
+	llk = .
+	for (att = 1; att <= 15; att++) {
+		if (G > 1) {
+			lsm_kmeans(Z, G, 15, cl, mu, wss)
+			sz = J(G, 1, 0)
+			for (g = 1; g <= G; g++) sz[g] = sum(cl :== g)
+			pK = sz / n
+			v = wss :/ (sz + (sz :== 0))
+			for (g = 1; g <= G; g++) if (v[g] <= tol) v[g] = sum((Z :- mean(Z)) :^ 2) / (n - d)
+		}
+		else {
+			mu = mean(Z)
+			pK = 1
+			v = sum((Z :- mean(Z)) :^ 2) / (n - d)
+		}
+		ok = 1
+		for (it = 1; it <= 200; it++) {
+			lg = J(n, G, .)
+			for (g = 1; g <= G; g++) lg[., g] = ln(pK[g] + (pK[g] == 0) * 1e-300) :- 0.5 * d * ln(2 * pi() * v[g]) :- rowsum((Z :- mu[g, .]) :^ 2) / (2 * v[g])
+			tot = rowmax(lg)
+			pz = exp(lg :- tot)
+			pz = pz :/ rowsum(pz)
+			pK1 = mean(pz)'
+			mu1 = J(G, d, 0)
+			v1 = J(G, 1, 0)
+			for (g = 1; g <= G; g++) {
+				mu1[g, .] = colsum(pz[., g] :* Z) / sum(pz[., g])
+				v1[g] = sum(pz[., g] :* rowsum((Z :- mu1[g, .]) :^ 2) / d) / sum(pz[., g])
+			}
+			if (hasmissing(mu1) | hasmissing(v1) | min(v1) <= 0) {
+				ok = 0
+				break
+			}
+			dm = max((mean(abs(pK1 - pK)) / mean(abs(pK)), mean(abs(vec(mu1 - mu))) / max((mean(abs(vec(mu))), 1e-300)), mean(abs(v1 - v)) / mean(abs(v))))
+			pK = pK1
+			mu = mu1
+			v = v1
+			if (dm < tol) break
+		}
+		if (!ok) continue
+		if (max(v) / min(v) > 1 / sqrt(epsilon(1))) continue
+		lg = J(n, G, .)
+		for (g = 1; g <= G; g++) lg[., g] = ln(pK[g]) :- 0.5 * d * ln(2 * pi() * v[g]) :- rowsum((Z :- mu[g, .]) :^ 2) / (2 * v[g])
+		tot = rowmax(lg)
+		llk = sum(tot + ln(rowsum(exp(lg :- tot))))
+		break
+	}
+	rngstate(rs)
+	return(llk)
+}
+
+// BIC components of latentnet for the positions Z (n x d), effects E (n x 3: sender, receiver, sociality), G clusters (0: none), eff the effective
+// number of observations; returns (Y, Z, sender, receiver, sociality, overall, p, lpY, G used)
+real rowvector LsmBic(real matrix y, real scalar dir, real matrix X, real matrix Z, real matrix E, real rowvector act, real scalar G, real scalar eff)
+{
+	real scalar n, d, i, j, p, lpY, Gs, llk, s2, bY, bZ, t
+	real matrix off
+	real rowvector out, r
+
+	n = rows(y)
+	d = cols(Z)
+	off = J(n, n, 0)
+	for (i = 1; i <= n; i++) for (j = 1; j <= n; j++) {
+		if (i == j) continue
+		off[i, j] = -sqrt(sum((Z[i, .] - Z[j, .]) :^ 2))
+		if (act[1]) off[i, j] = off[i, j] + E[i, 1]
+		if (act[2]) off[i, j] = off[i, j] + E[j, 2]
+		if (act[3]) off[i, j] = off[i, j] + E[i, 3] + E[j, 3]
+	}
+	r = lsm_condmle(y, dir, X, off)
+	lpY = r[1]
+	p = cols(r) - 1
+	bY = -2 * lpY + p * ln(eff)
+	Gs = G
+	if (G > 0) {
+		llk = .
+		while (llk >= . & Gs > 0) {
+			llk = lsm_em_vii(Z, Gs)
+			if (llk >= .) Gs--
+		}
+		if (Gs < G) errprintf("nwlsm: bad clustering, treating %g clusters as empty\n", G - Gs)
+		bZ = -2 * llk + (Gs - 1 + d * Gs + Gs) * ln(n)
+	}
+	else {
+		s2 = sum(Z :^ 2) / n
+		bZ = n * d * ln(2 * pi() * s2) + n + ln(n * d)
+	}
+	out = (bY, bZ, 0, 0, 0)
+	for (t = 1; t <= 3; t++) if (act[t]) {
+		s2 = sum(E[., t] :^ 2) / n
+		out[2 + t] = n * (ln(2 * pi() * s2) + 1) + ln(n)
+	}
+	return((out, sum(out), p, lpY, Gs))
+}
+
+// BIC of the last fit (positions: the MKL positions; effects E: n x 3 as e(mkl_effects)); eff: effective number of observations (0: the number of ties)
+real rowvector LsmBicFit(real matrix E, real scalar G, real scalar eff)
+{
+	external __nwlsm_gY, __nwlsm_gX, __nwlsm_gm, __nwlsm_MZ
+	real matrix y, A
+	real scalar dir, n
+
+	y = __nwlsm_gY
+	n = rows(y)
+	dir = __nwlsm_gm[1]
+	if (eff <= 0) {
+		A = (y :== 1) :* (J(n, n, 1) - I(n))
+		eff = (dir ? sum(A) : sum(lowertriangle(A, 0)))
+	}
+	return((LsmBic(y, dir, __nwlsm_gX, __nwlsm_MZ, E, __nwlsm_gm[3..5], G, eff), eff))
 }
 
 end
