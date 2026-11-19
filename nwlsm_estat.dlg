@@ -1,4 +1,4 @@
-/* nwlsm_estat.dlg - dialog of estat after nwlsm: positions, mcmcdiag, clusters, predict. */
+/* nwlsm_estat.dlg - dialog of estat after nwlsm: positions, mcmcdiag, clusters, predict, gof, ppcheck. */
 VERSION 14.0
 INCLUDE _std_small
 SYNCHRONOUS_ONLY
@@ -7,7 +7,7 @@ OK ok1, label("OK")
 CANCEL can1, label("Cancel")
 SUBMIT sub1, label("Submit")
 RESET res1
-POSITION 10 10 560 330
+POSITION 10 10 560 500
 
 DIALOG main, title("estat - Postestimation after nwlsm")
 BEGIN
@@ -15,13 +15,28 @@ BEGIN
   RADIO rb_pos 20 36 520 ., label("positions - the latent positions (and effects of the actors)") first default(1) onclickon(script pos_on)
   RADIO rb_dia 20 58 520 ., label("mcmcdiag - effective sample sizes, Geweke z, Gelman-Rubin statistic") middle onclickon(script dia_on)
   RADIO rb_clu 20 80 520 ., label("clusters - posterior membership probabilities and classification") middle onclickon(script clu_on)
-  RADIO rb_pre 20 102 520 ., label("predict - posterior mean tie probabilities") last onclickon(script pre_on)
-  GROUPBOX gb_opt 10 132 540 150, label("Options")
-  CHECKBOX cx_mean 20 154 500 ., label("mean: mean of the aligned draws instead of the MKL positions (positions)")
-  TEXT tx_gen 20 182 200 ., label("generate() (stub or network name):")
-  EDIT ed_gen 230 182 160 ., nomem
-  CHECKBOX cx_rep 20 208 500 ., label("replace an existing network (predict)")
-  CHECKBOX cx_nol 20 234 500 ., label("nolist: do not list the table")
+  RADIO rb_pre 20 102 520 ., label("predict - posterior mean tie probabilities") middle onclickon(script pre_on)
+  RADIO rb_gof 20 124 520 ., label("gof - goodness of fit: networks simulated from the posterior") middle onclickon(script gof_on)
+  RADIO rb_ppc 20 146 520 ., label("ppcheck - posterior predictive check of the tie probabilities") last onclickon(script ppc_on)
+  GROUPBOX gb_opt 10 176 540 312, label("Options")
+  CHECKBOX cx_mean 20 198 500 ., label("mean: mean of the aligned draws instead of the MKL positions (positions)")
+  TEXT tx_gen 20 226 200 ., label("generate() (stub or network name):")
+  EDIT ed_gen 230 226 160 ., nomem
+  CHECKBOX cx_rep 20 252 500 ., label("replace an existing network (predict)")
+  CHECKBOX cx_nol 20 278 500 ., label("nolist: do not list the table")
+  CHECKBOX cx_gr 20 304 500 ., label("graph: trace plots of the draws (mcmcdiag) or calibration plot (ppcheck)")
+  TEXT tx_nsim 20 334 200 ., label("Simulated networks (gof):")
+  SPINNER sp_nsim 230 334 90 ., default(100) min(2) max(100000) nomem
+  TEXT tx_gseed 340 334 90 ., label("Seed:")
+  EDIT ed_gseed 430 334 100 ., nomem
+  TEXT tx_gterms 20 362 200 ., label("Statistics (gof), blank = default:")
+  EDIT ed_gterms 230 362 300 ., nomem
+  TEXT tx_gnote 20 388 510 ., label("degree idegree odegree espartners dspartners distance model values")
+  CHECKBOX cx_gplot 20 414 500 ., label("plot: box plots of the simulated statistics (gof)")
+  TEXT tx_grp 20 442 200 ., label("Groups (ppcheck):")
+  SPINNER sp_grp 230 442 90 ., default(10) min(2) max(50) nomem
+  TEXT tx_thr 340 442 90 ., label("Threads (gof):")
+  SPINNER sp_thr 430 442 90 ., default(0) min(0) max(256) nomem
 END
 
 SCRIPT pos_on
@@ -30,6 +45,13 @@ BEGIN
 	main.ed_gen.enable
 	main.cx_rep.disable
 	main.cx_nol.enable
+	main.cx_gr.disable
+	main.sp_nsim.disable
+	main.ed_gseed.disable
+	main.ed_gterms.disable
+	main.cx_gplot.disable
+	main.sp_grp.disable
+	main.sp_thr.disable
 END
 
 SCRIPT dia_on
@@ -38,6 +60,13 @@ BEGIN
 	main.ed_gen.disable
 	main.cx_rep.disable
 	main.cx_nol.enable
+	main.cx_gr.enable
+	main.sp_nsim.disable
+	main.ed_gseed.disable
+	main.ed_gterms.disable
+	main.cx_gplot.disable
+	main.sp_grp.disable
+	main.sp_thr.disable
 END
 
 SCRIPT clu_on
@@ -46,6 +75,13 @@ BEGIN
 	main.ed_gen.enable
 	main.cx_rep.disable
 	main.cx_nol.enable
+	main.cx_gr.disable
+	main.sp_nsim.disable
+	main.ed_gseed.disable
+	main.ed_gterms.disable
+	main.cx_gplot.disable
+	main.sp_grp.disable
+	main.sp_thr.disable
 END
 
 SCRIPT pre_on
@@ -54,10 +90,50 @@ BEGIN
 	main.ed_gen.enable
 	main.cx_rep.enable
 	main.cx_nol.disable
+	main.cx_gr.disable
+	main.sp_nsim.disable
+	main.ed_gseed.disable
+	main.ed_gterms.disable
+	main.cx_gplot.disable
+	main.sp_grp.disable
+	main.sp_thr.disable
+END
+
+SCRIPT gof_on
+BEGIN
+	main.cx_mean.disable
+	main.ed_gen.disable
+	main.cx_rep.disable
+	main.cx_nol.disable
+	main.cx_gr.disable
+	main.sp_nsim.enable
+	main.ed_gseed.enable
+	main.ed_gterms.enable
+	main.cx_gplot.enable
+	main.sp_grp.disable
+	main.sp_thr.enable
+END
+
+SCRIPT ppc_on
+BEGIN
+	main.cx_mean.disable
+	main.ed_gen.disable
+	main.cx_rep.disable
+	main.cx_nol.enable
+	main.cx_gr.enable
+	main.sp_nsim.disable
+	main.ed_gseed.disable
+	main.ed_gterms.disable
+	main.cx_gplot.disable
+	main.sp_grp.enable
+	main.sp_thr.disable
 END
 
 PROGRAM command
 BEGIN
+	if main.rb_gof & main.ed_gseed.isneq("") & !main.ed_gseed.isnumlist() {
+		stopbox stop "Seed: enter an integer."
+	}
 	if main.rb_pos {
 		put "estat positions"
 	}
@@ -70,18 +146,47 @@ BEGIN
 	if main.rb_pre {
 		put "estat predict"
 	}
+	if main.rb_gof {
+		put "estat gof"
+	}
+	if main.rb_ppc {
+		put "estat ppcheck"
+	}
 	put ","
 	if main.cx_mean & main.rb_pos {
 		put " mean"
 	}
-	if main.ed_gen.isneq("") & !main.rb_dia {
+	if main.ed_gen.isneq("") & (main.rb_pos | main.rb_clu | main.rb_pre) {
 		put " generate(" main.ed_gen ")"
 	}
 	if main.cx_rep & main.rb_pre {
 		put " replace"
 	}
-	if main.cx_nol & !main.rb_pre {
+	if main.cx_nol & (main.rb_pos | main.rb_dia | main.rb_clu | main.rb_ppc) {
 		put " nolist"
+	}
+	if main.cx_gr & (main.rb_dia | main.rb_ppc) {
+		put " graph"
+	}
+	if main.rb_gof {
+		if !main.sp_nsim.isdefault() {
+			put " nsim(" main.sp_nsim ")"
+		}
+		if main.ed_gseed.isneq("") {
+			put " seed(" main.ed_gseed ")"
+		}
+		if main.ed_gterms.isneq("") {
+			put " gof(" main.ed_gterms ")"
+		}
+		if main.cx_gplot {
+			put " plot"
+		}
+		if !main.sp_thr.isdefault() {
+			put " threads(" main.sp_thr ")"
+		}
+	}
+	if main.rb_ppc & !main.sp_grp.isdefault() {
+		put " groups(" main.sp_grp ")"
 	}
 	stata
 END

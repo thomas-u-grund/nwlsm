@@ -1,9 +1,9 @@
 {smcl}
-{* *! version 0.4.0  19nov2026 author: Thomas Grund}{...}
+{* *! version 0.5.0  19nov2026 author: Thomas Grund}{...}
 {title:Title}
 
 {p2colset 9 17 24 2}{...}
-{p2col :nwlsm  {hline 2}}Latent space model for the ties of a binary network, fitted by MCMC{p_end}
+{p2col :nwlsm  {hline 2}}Latent space model for the ties of a binary or valued network, fitted by MCMC{p_end}
 {p2colreset}{...}
 
 {title:Syntax}
@@ -15,17 +15,20 @@
 {cmd:nwlsm}  (replay after a fit)
 
 {p 8 16 2}
-{cmd:estat} {c -(}{cmd:positions}|{cmd:mcmcdiag}|{cmd:clusters}|{cmd:predict}{c )-} [{cmd:,} {it:options}]
+{cmd:estat} {c -(}{cmd:positions}|{cmd:mcmcdiag}|{cmd:clusters}|{cmd:predict}|{cmd:gof}|{cmd:ppcheck}{c )-} [{cmd:,} {it:options}]
 
 {p 8 16 2}
 {cmd:nwlsm version}
 
 {pstd}
-{it:netname} is a one-mode network of the nwcommands family, undirected or directed and binary. Self-loops are ignored; ties with a missing value are left out of the likelihood.
+{it:netname} is a one-mode network of the nwcommands family, undirected or directed, binary or (with {opt family()}) valued. Self-loops are ignored; ties with a missing value are left out of the likelihood.
 
 {synoptset 28 tabbed}{...}
 {synopthdr}
 {synoptline}
+{synopt :{opt fam:ily(name)}}distribution of the tie values: {cmd:bernoulli} (default; binary ties), {cmd:poisson}, {cmd:binomial} or {cmd:normal} (alias {cmd:gaussian}){p_end}
+{synopt :{opt tri:als(spec)}}binomial family: the number of trials, as a number, a network or a Stata matrix{p_end}
+{synopt :{opt dispv:ar(#)}, {opt dispd:f(#)}}normal family: scale (default 1) and degrees of freedom (default 3) of the prior of the dispersion (the variance of the values){p_end}
 {synopt :{opt dim(#)}}number of latent dimensions, 1 to 10; default {cmd:2}{p_end}
 {synopt :{opt edgecov(list)}}edge covariates: networks of the same actors, or Stata matrices with one row and column per actor{p_end}
 {synopt :{opt absdiff(varlist)}}numeric node variables (one observation per actor, in the order of the actors) entered as the absolute difference |x_i - x_j|{p_end}
@@ -63,6 +66,23 @@ replaced by the inner product z_i'z_j, which is added to the log odds. Actors th
 are more likely to be tied; ties are independent given the positions. For an undirected network every pair counts once. The posterior is sampled by Markov chain Monte
 Carlo in a compiled (C) plugin: a random-walk Metropolis-Hastings update of one position at a time, of one random effect at a time and of each coefficient in turn,
 and Gibbs updates of the variances of the positions and of the random effects.
+
+{title:Valued networks}
+
+{pstd}
+With {opt family()} the values of the ties are modelled instead of their presence, as latentnet does with its {cmd:response} and {cmd:family} arguments. The linear predictor
+eta_ij = b_0 + b_1 x_ij1 + ... + s_i + r_j + o_i + o_j - |z_i - z_j| (or with the inner product) is the same in all families; the families differ in how the value y_ij depends on it:
+
+{phang2}{cmd:poisson}: y_ij ~ Poisson(exp(eta_ij)); non-negative integer values (counts).{p_end}
+{phang2}{cmd:binomial}: y_ij ~ Binomial(m_ij, logistic(eta_ij)) with the number of trials m_ij given by {opt trials()}: a positive integer (the same for all dyads), a network of the same actors or a Stata matrix with one row and column per actor. The values are integers from 0 to m_ij.{p_end}
+{phang2}{cmd:normal}: y_ij ~ N(eta_ij, tau2) with the dispersion tau2 (the variance of the values) having a scaled inverse chi-squared prior with scale {opt dispvar()} and {opt dispdf()} degrees of freedom; any real values. latentnet requires the prior of the dispersion to be given; here the defaults are 1 and 3.{p_end}
+
+{pstd}
+The network must carry its values: a network created with {cmd:nwset ..., valued} (or from a weighted import) is valued; a valued network without {opt family()} is refused unless all its ties equal 1. The values of the network are
+used as they are: a dyad without a tie has the value 0 (a missing dyad is left out of the likelihood). Sender, receiver and sociality effects, covariates, clusters, the bilinear term, chains and threads work as in the binary model.
+The priors of the coefficients, the positions and the random effects are those of the binary model. Starting values: the positions from classical scaling of a dissimilarity made from the values, the coefficients from a generalised linear model of the family given those distances. The variance of the normal family is sampled by a Gibbs step and kept as the last row of {cmd:e(vsummary)} (and as the variable {cmd:dispersion} of {opt savedraws()}).
+The minimum Kullback-Leibler fit uses the family's log likelihood of the posterior mean expected values; for the normal family that objective is scaled by the posterior mean of the dispersion. With a valued family {cmd:e(P)} is the matrix of the posterior mean expected values E(y_ij) (the tie probabilities for the binary model; m_ij times the probability for the binomial family).
+{cmd:estat gof} for a valued network works on the network of the dyads with a positive value, and tabulates the distribution of the values.
 
 {title:Model and priors}
 
@@ -122,6 +142,7 @@ These matrices are stored when the number of actors fits into a Stata matrix.
 {synopt :{cmd:e(sender)}, {cmd:e(receiver)}, {cmd:e(sociality)}}posterior mean and sd of each effect (one row per actor){p_end}
 {synopt :{cmd:e(mkl_b)}, {cmd:e(mkl_effects)}}coefficients and effects of the MKL fit{p_end}
 {synopt :{cmd:e(effects)}, {cmd:e(latent)}}the random effects in the model; {cmd:euclidean} or {cmd:bilinear}{p_end}
+{synopt :{cmd:e(family)}, {cmd:e(trials)}, {cmd:e(dispvar)}, {cmd:e(dispdf)}}the family; the number of trials if one number was given; the prior of the dispersion (normal family){p_end}
 {p2colreset}{...}
 
 {pstd}
@@ -161,8 +182,8 @@ posterior means of the draws; they are not the mixture fitted to the positions b
 With {opt generate()} the coordinates go into the variables {it:stub}1, {it:stub}2, ... of a data set with one observation per actor, in the order of the actors.
 
 {phang}
-{cmd:estat mcmcdiag} [{cmd:, nolist}] shows, for the coefficients, the log likelihood and the variance parameters, the posterior mean and standard deviation, the effective sample size
-(initial monotone positive sequence estimator of Geyer), the Geweke z-score (first 10 percent of the draws against the last 50 percent) and, with several chains, the Gelman-Rubin statistic, and returns them in {cmd:r(diag)}. It needs the draws of the last fit, which stay in memory.
+{cmd:estat mcmcdiag} [{cmd:, nolist graph name(}{it:name}{cmd:)}] shows, for the coefficients, the log likelihood and the variance parameters, the posterior mean and standard deviation, the effective sample size
+(initial monotone positive sequence estimator of Geyer), the Geweke z-score (first 10 percent of the draws against the last 50 percent) and, with several chains, the Gelman-Rubin statistic, and returns them in {cmd:r(diag)}. It needs the draws of the last fit, which stay in memory. With {opt graph} the trace plots of all these quantities are drawn (one line per chain, with the Gelman-Rubin statistic in the title) and combined into one graph.
 
 {phang}
 {cmd:estat clusters} [{cmd:, generate(}{it:stub}{cmd:) nolist}] (after {opt clusters()}) lists the posterior membership probabilities and the classification and returns them in {cmd:r(Q)} and {cmd:r(class)}. With {opt generate()} the variables
@@ -170,6 +191,21 @@ With {opt generate()} the coordinates go into the variables {it:stub}1, {it:stub
 
 {phang}
 {cmd:estat predict} [{cmd:, generate(}{it:netname}{cmd:) replace}] returns the posterior mean tie probabilities in {cmd:r(P)} and, with {opt generate()}, stores them as a valued network of the family.
+
+{phang}
+{cmd:estat gof} [{cmd:, nsim(}{it:#}{cmd:) seed(}{it:#}{cmd:) gof(}{it:terms}{cmd:) plot maxdeg(}{it:#}{cmd:) maxdist(}{it:#}{cmd:) name(}{it:name}{cmd:) threads(}{it:#}{cmd:)}] is the goodness of fit of latentnet's {cmd:gof()}: one network is simulated from the model at each of {opt nsim()}
+(default 100) posterior draws, taken evenly spaced from the stored draws, and statistics of the observed network are compared with their distribution over the simulated networks. {opt gof()} lists the statistics:
+{cmd:degree} (undirected), {cmd:idegree} and {cmd:odegree} (directed), {cmd:espartners} (edgewise shared partners; for directed networks the outgoing two-paths i-k-j), {cmd:dspartners} (dyadwise shared partners), {cmd:distance} (geodesic distances, the last cell is unreachable pairs),
+{cmd:model} (the total value of the ties and the sum of each covariate over the ties) and {cmd:values} (valued networks: the number of dyads with each value; for the normal family in ten bins of equal observed frequency). The default is latentnet's:
+{cmd:degree distance} (undirected) or {cmd:idegree odegree distance} (directed), plus {cmd:values} for the Poisson and binomial families, and {cmd:model values} for the normal family (whose network structure is not defined).
+For each cell the table shows the observed count, the minimum, mean and maximum over the simulated networks and the Monte Carlo p-value 2 min(P(simulated <= observed), P(simulated >= observed)), at most 1, as in latentnet.
+With {opt plot} the shares of the observed and the simulated networks are drawn in box plots (the observed network as a red line). The tables are returned in {cmd:r(gof_degree)}, {cmd:r(gof_distance)} and so on. Missing dyads of the observed network count as no tie.
+Deviation from latentnet: its {cmd:simulate()} draws an undirected network by drawing every ordered pair and keeping a tie if either draw is a tie, so that its simulated undirected networks are too dense and its undirected {cmd:gof()} is biased;
+{cmd:estat gof} draws one value for every pair. For directed networks the simulation agrees with latentnet's.
+
+{phang}
+{cmd:estat ppcheck} [{cmd:, groups(}{it:#}{cmd:) graph name(}{it:name}{cmd:) nolist}] is a posterior predictive check of the tie probabilities: the dyads are sorted by their posterior mean predicted probability (expected value) and cut into {opt groups()} (default 10) groups of about equal size; the table compares the mean prediction with the observed mean
+in every group. Below it: for binary networks the Brier score, the area under the ROC curve and the mean log loss; for valued networks the root mean squared error, the correlation and the mean absolute error of the posterior mean expected values with the observed values. {opt graph} draws the calibration plot. Returned in {cmd:r(groups)}, {cmd:r(score)}, {cmd:r(auc_or_corr)} and {cmd:r(N)}.
 
 {pstd}
 {help nwlsmplot} plots the positions with the ties as light lines, the actors coloured by a variable and sized by an effect or a variable.
@@ -186,6 +222,12 @@ With {opt generate()} the coordinates go into the variables {it:stub}1, {it:stub
 {phang2}{cmd:. nwlsm friends, dim(2) chains(4) nsample(4000)}{p_end}
 {phang2}{cmd:. nwlsm friends, dim(2) clusters(3)}{p_end}
 {phang2}{cmd:. estat clusters, generate(grp)}{p_end}
+{phang2}{cmd:. nwlsm counts, family(poisson) dim(2)}{p_end}
+{phang2}{cmd:. nwlsm votes, family(binomial) trials(10) sender receiver}{p_end}
+{phang2}{cmd:. nwlsm ratings, family(normal) dispvar(1) dispdf(3)}{p_end}
+{phang2}{cmd:. estat gof, nsim(200) plot}{p_end}
+{phang2}{cmd:. estat ppcheck, graph}{p_end}
+{phang2}{cmd:. estat mcmcdiag, graph}{p_end}
 {phang2}{cmd:. nwlsmplot, clusters}{p_end}
 {phang2}{cmd:. nwlsmplot, color(gender) size(sociality)}{p_end}
 
@@ -197,4 +239,4 @@ With {opt generate()} the coordinates go into the variables {it:stub}1, {it:stub
 {p 4 8 2}Krivitsky, P. N., Handcock, M. S., Raftery, A. E. and Hoff, P. D. 2009. Representing degree distributions, clustering, and homophily in social networks with latent cluster random effects models. Social Networks 31: 204-213.{p_end}
 
 {hline}
-{pstd}{it:nwlsm version 0.4.0, 19 November 2026}{p_end}{* nwversion}
+{pstd}{it:nwlsm version 0.5.0, 19 November 2026}{p_end}{* nwversion}

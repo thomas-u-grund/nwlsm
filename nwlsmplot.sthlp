@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 0.4.0  19nov2026 author: Thomas Grund}{...}
+{* *! version 0.5.0  19nov2026 author: Thomas Grund}{...}
 {title:Title}
 
 {p2colset 9 20 27 2}{...}
@@ -48,4 +48,4 @@ orientation of the axes carries no meaning.
 {psee}{help nwlsm}, {help nwplot}{p_end}
 
 {hline}
-{pstd}{it:nwlsm version 0.4.0, 19 November 2026}{p_end}{* nwversion}
+{pstd}{it:nwlsm version 0.5.0, 19 November 2026}{p_end}{* nwversion}

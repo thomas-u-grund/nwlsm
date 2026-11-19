@@ -1,4 +1,4 @@
-*! version 0.4.0  19nov2026 nwlsm_estat
+*! version 0.5.0  19nov2026 nwlsm_estat
 * Copyright (C) 2026 Thomas U. Grund. Part of nwlsm; GNU GPL-3 (see LICENSE).
 
 capture program drop nwlsm_estat
@@ -235,7 +235,7 @@ program _nwlsm_mcmcdiag, rclass
 	return matrix diag = `R'
 end
 
-* estat predict: the posterior mean tie probabilities as a valued network of nwcommands (and r(P))
+* estat predict: the posterior mean tie probabilities (expected values of a valued family) as a valued network of nwcommands (and r(P))
 capture program drop _nwlsm_predict
 program _nwlsm_predict, rclass
 	version 14
@@ -263,7 +263,7 @@ program _nwlsm_predict, rclass
 		else nwset __lsmp*, name(`generate') undirected valued
 		restore
 		capture matrix drop __lsmP
-		di as text "Posterior mean tie probabilities stored as the valued network {bf:`generate'}."
+		di as text cond("`e(family)'" == "poisson" | "`e(family)'" == "binomial" | "`e(family)'" == "normal", "Posterior mean expected values stored as the valued network {bf:`generate'}.", "Posterior mean tie probabilities stored as the valued network {bf:`generate'}.")
 	}
 	return matrix P = `P'
 end

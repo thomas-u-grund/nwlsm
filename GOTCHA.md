@@ -31,3 +31,10 @@ Draws from different chains are rotated differently. Everything pooled across ch
 
 ## Cluster labels
 The chain's labels switch freely in a cluster model. `lsm_relabel()` permutes the labels of every draw (all G! permutations, G <= 6) to maximise agreement with the reference memberships. `PI` also reorders the variances, the mixing proportions and the cluster means. Mata colon operators do not broadcast a column against a row (`c :== r` gives r(3200)); expand with `J()`.
+
+## Valued families: details worth knowing
+- Plugin blob: for a valued family the y block is values, then an observed mask, then trials (binomial). The plugin protocol was raised; stale plugins are refused by `_nwlsm_libcheck`. Only the macOS plugin is rebuilt locally; the Linux and Windows plugins are stale until CI rebuilds them after a push touching `native/`.
+- Normal family: latentnet requires `prior.var` and `prior.var.df`; our defaults 1 and 3 are our own. The MKL objective is divided by the posterior mean dispersion; latentnet's MKL dispersion is probably invalid, so our objective can differ slightly (better or equal on the same expected values).
+- latentnet 2.12.0 `simulate()` for UNDIRECTED networks draws every ordered pair and keeps a tie if either draw is a tie (about 1.5 times the edges), so its undirected `gof()` is biased; `estat gof` draws once per pair. The undirected reference in `dev/ref_latentnet.R` (`gof_fixture_u`) is built from latentnet's draws with one draw per dyad. latentnet `gof(model)` fails for latent formulas.
+- Mata: `rpoisson(r,c,m)` with a matrix `m` returns rows(m)*r rows, use `rpoisson(1,1,m)`; `import`/`preserve` clear `r()`, stash `r()` matrices first; a ternary with a 1x1 matrix condition gave r(3204), use `if`; a `'` just before `}` on one line breaks do-file parsing; Stata matrix row names cannot contain spaces.
+- `estat gof` is deterministic given `seed()` and does not depend on `threads()` (per-draw generator seed + 7919 (k+1)).
