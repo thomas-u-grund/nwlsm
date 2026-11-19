@@ -22,9 +22,45 @@ program nwlsm, eclass
 	}
 	syntax anything(name=netname) [, Dim(integer 2) EDGEcov(string) ABSdiff(string) NSample(integer 4000) BURNin(integer 10000) ///
 		INTerval(integer 10) SEED(string) PILOT(integer 4) PLEN(integer 500) RANDOMstart SAVEDraws(string) ///
-		SENDER RECEIVER SOCiality SENDERVar(real 1) SENDERDf(real 3) RECEIVERVar(real 1) RECEIVERDf(real 3) SOCIALITYVar(real 1) SOCIALITYDf(real 3) BILinear MKLStarts(integer 1) CHAins(integer 1) THReads(integer 0) CLUsters(integer 0)]
+		SENDER RECEIVER SOCiality SENDERVar(real 1) SENDERDf(real 3) RECEIVERVar(real 1) RECEIVERDf(real 3) SOCIALITYVar(real 1) SOCIALITYDf(real 3) BILinear MKLStarts(integer 1) CHAins(integer 1) THReads(integer 0) CLUsters(integer 0) FAMily(string) TRIals(string) DISPVar(real 1) DISPDf(real 3)]
 	if `dim' < 1 | `dim' > 10 {
 		di as error "dim() must be an integer between 1 and 10"
+		error 198
+	}
+	local __fam 0
+	local __famname "bernoulli"
+	if `"`family'"' != "" {
+		local __fl = lower(`"`family'"')
+		if inlist("`__fl'", "bernoulli", "binary") {
+			local __fam 0
+		}
+		else if "`__fl'" == "poisson" {
+			local __fam 1
+			local __famname "poisson"
+		}
+		else if "`__fl'" == "binomial" {
+			local __fam 2
+			local __famname "binomial"
+		}
+		else if inlist("`__fl'", "normal", "gaussian") {
+			local __fam 3
+			local __famname "normal"
+		}
+		else {
+			di as error "{p 0 0 2}family() must be bernoulli (the default), poisson, binomial or normal.{p_end}"
+			error 198
+		}
+	}
+	if `"`trials'"' != "" & `__fam' != 2 {
+		di as error "trials() belongs to family(binomial)"
+		error 198
+	}
+	if `__fam' == 2 & `"`trials'"' == "" {
+		di as error "{p 0 0 2}family(binomial) needs trials(): a number, a network or a matrix with the numbers of trials of the dyads.{p_end}"
+		error 198
+	}
+	if `__fam' == 3 & (`dispvar' <= 0 | `dispdf' <= 0) {
+		di as error "dispvar() and dispdf() (the prior scale and degrees of freedom of the dispersion) must be positive"
 		error 198
 	}
 	if `nsample' < 10 | `burnin' < 0 | `interval' < 1 | `pilot' < 0 | `plen' < 10 {
@@ -69,9 +105,12 @@ program nwlsm, eclass
 		di as error "nwlsm fits one-mode networks; `netname' is a two-mode network."
 		error 198
 	}
-	if "`valued'" == "true" {
-		di as error "{p 0 0 2}nwlsm fits binary networks; `netname' is a valued network. Use {bf:nwset} or {bf:nwreplace} to dichotomise it first.{p_end}"
-		error 198
+	if "`valued'" == "true" & `__fam' == 0 {
+		mata: st_local("__valok", strofreal(`netobj'->get_arcs_count() == 0 | (`netobj'->get_maximum() <= 1 & `netobj'->get_minimum() >= 0 & `netobj'->get_arcs_sum() == `netobj'->get_arcs_count())))
+		if !`__valok' {
+			di as error "{p 0 0 2}`netname' is a valued network: use family(poisson), family(binomial) with trials(), or family(normal) to model the values, or dichotomise it first with {bf:nwreplace}.{p_end}"
+			error 198
+		}
 	}
 	if `nodes' < 3 {
 		di as error "the network needs at least 3 actors"
@@ -86,16 +125,20 @@ program nwlsm, eclass
 		di as error "sociality cannot be combined with sender or receiver effects in an undirected network"
 		error 198
 	}
-	local __opt "`=("`sender'" != "")' `=("`receiver'" != "")' `=("`sociality'" != "")' `=("`bilinear'" != "")' `sendervar' `senderdf' `receivervar' `receiverdf' `socialityvar' `socialitydf' `mklstarts' `chains' `threads' `clusters'"
-	capture mata: mata drop __nwlsm_y __nwlsm_X
-	mata: __nwlsm_y = lsm_ymat(*(`netobj'->get_matrix()))
+	local __opt "`=("`sender'" != "")' `=("`receiver'" != "")' `=("`sociality'" != "")' `=("`bilinear'" != "")' `sendervar' `senderdf' `receivervar' `receiverdf' `socialityvar' `socialitydf' `mklstarts' `chains' `threads' `clusters' `__fam' `dispvar' `dispdf'"
+	capture mata: mata drop __nwlsm_y
+	capture mata: mata drop __nwlsm_X
+	capture mata: mata drop __nwlsm_tr
+	if `__fam' == 0 mata: __nwlsm_y = lsm_ymat(*(`netobj'->get_matrix()))
+	else mata: __nwlsm_y = *(`netobj'->get_matrix())
+	mata: __nwlsm_tr = J(0, 0, .)
 	mata: __nwlsm_X = J(0, `nodes', .)
 	local __names "_cons"
 	foreach __c of local edgecov {
 		capture _nwsyntax `__c', max(1) other(__cv)
 		if !_rc {
 			if "`__cvis2mode'" == "true" | `__cvnodes' != `nodes' {
-				capture mata: mata drop __nwlsm_y __nwlsm_X
+				capture mata: mata drop __nwlsm_y __nwlsm_X __nwlsm_tr
 				di as error "{p 0 0 2}the edge covariate {bf:`__c'} must be a one-mode network of the same `nodes' actors as {bf:`netname'}.{p_end}"
 				error 198
 			}
@@ -104,12 +147,12 @@ program nwlsm, eclass
 		else {
 			capture confirm matrix `__c'
 			if _rc {
-				capture mata: mata drop __nwlsm_y __nwlsm_X
+				capture mata: mata drop __nwlsm_y __nwlsm_X __nwlsm_tr
 				di as error "{p 0 0 2}edgecov(): {bf:`__c'} is neither a network nor a Stata matrix.{p_end}"
 				error 198
 			}
 			if rowsof(`__c') != `nodes' | colsof(`__c') != `nodes' {
-				capture mata: mata drop __nwlsm_y __nwlsm_X
+				capture mata: mata drop __nwlsm_y __nwlsm_X __nwlsm_tr
 				di as error "{p 0 0 2}the matrix {bf:`__c'} must have `nodes' rows and columns, one for each actor of {bf:`netname'}.{p_end}"
 				error 198
 			}
@@ -120,25 +163,25 @@ program nwlsm, eclass
 	if "`absdiff'" != "" {
 		capture unab absdiff : `absdiff'
 		if _rc {
-			capture mata: mata drop __nwlsm_y __nwlsm_X
+			capture mata: mata drop __nwlsm_y __nwlsm_X __nwlsm_tr
 			di as error "absdiff(): not a list of variables in the current dataset"
 			error 111
 		}
 		capture confirm numeric variable `absdiff'
 		if _rc {
-			capture mata: mata drop __nwlsm_y __nwlsm_X
+			capture mata: mata drop __nwlsm_y __nwlsm_X __nwlsm_tr
 			di as error "absdiff(): the variables must be numeric"
 			error 109
 		}
 		if _N != `nodes' {
-			capture mata: mata drop __nwlsm_y __nwlsm_X
+			capture mata: mata drop __nwlsm_y __nwlsm_X __nwlsm_tr
 			di as error "{p 0 0 2}absdiff() needs one observation per actor in the current dataset, in the order of the actors of {bf:`netname'} (the dataset has `=_N' observations, the network `nodes' actors).{p_end}"
 			error 198
 		}
 		foreach __v of local absdiff {
 			mata: st_local("__hm", strofreal(hasmissing(st_data(., "`__v'"))))
 			if `__hm' {
-				capture mata: mata drop __nwlsm_y __nwlsm_X
+				capture mata: mata drop __nwlsm_y __nwlsm_X __nwlsm_tr
 				di as error "absdiff(): variable {bf:`__v'} has missing values"
 				error 416
 			}
@@ -148,25 +191,71 @@ program nwlsm, eclass
 	}
 	mata: st_local("__hm", strofreal(hasmissing(__nwlsm_X)))
 	if `__hm' {
-		capture mata: mata drop __nwlsm_y __nwlsm_X
+		capture mata: mata drop __nwlsm_y __nwlsm_X __nwlsm_tr
 		di as error "edge covariates must not have missing values"
 		error 416
 	}
 	local __nc : word count `__names'
 	local __dp : list dups __names
 	if "`__dp'" != "" {
-		capture mata: mata drop __nwlsm_y __nwlsm_X
+		capture mata: mata drop __nwlsm_y __nwlsm_X __nwlsm_tr
 		di as error "the same edge covariate is listed twice"
 		error 198
+	}
+	if `__fam' > 0 {
+		if `__fam' == 2 {
+			capture confirm number `trials'
+			if !_rc {
+				if `trials' < 1 | `trials' != floor(`trials') {
+					capture mata: mata drop __nwlsm_y __nwlsm_X __nwlsm_tr
+					di as error "trials() must be a positive integer, a network or a matrix of positive integers"
+					error 198
+				}
+				mata: __nwlsm_tr = J(`nodes', `nodes', `trials')
+			}
+			else {
+				capture _nwsyntax `trials', max(1) other(__tr)
+				if !_rc {
+					if "`__tris2mode'" == "true" | `__trnodes' != `nodes' {
+						capture mata: mata drop __nwlsm_y __nwlsm_X __nwlsm_tr
+						di as error "{p 0 0 2}trials(): the network {bf:`trials'} must be a one-mode network of the same `nodes' actors as {bf:`netname'}.{p_end}"
+						error 198
+					}
+					mata: __nwlsm_tr = *(`__trnetobj'->get_matrix())
+				}
+				else {
+					capture confirm matrix `trials'
+					if _rc {
+						capture mata: mata drop __nwlsm_y __nwlsm_X __nwlsm_tr
+						di as error "{p 0 0 2}trials(): {bf:`trials'} is neither a number, a network nor a Stata matrix.{p_end}"
+						error 198
+					}
+					if rowsof(`trials') != `nodes' | colsof(`trials') != `nodes' {
+						capture mata: mata drop __nwlsm_y __nwlsm_X __nwlsm_tr
+						di as error "{p 0 0 2}the matrix {bf:`trials'} must have `nodes' rows and columns, one for each actor of {bf:`netname'}.{p_end}"
+						error 198
+					}
+					mata: __nwlsm_tr = st_matrix("`trials'")
+				}
+			}
+		}
+		mata: st_local("__vc", strofreal(lsm_checkvalues(__nwlsm_y, `__dir', `__fam', __nwlsm_tr)))
+		if `__vc' > 0 {
+			capture mata: mata drop __nwlsm_y __nwlsm_X __nwlsm_tr
+			if `__vc' == 1 di as error "{p 0 0 2}family(`__famname') needs non-negative integer values on the dyads of {bf:`netname'}.{p_end}"
+			if `__vc' == 2 di as error "{p 0 0 2}a value of {bf:`netname'} is larger than the number of trials of its dyad.{p_end}"
+			if `__vc' == 4 di as error "{p 0 0 2}trials() must be a positive integer for every observed dyad.{p_end}"
+			error 198
+		}
 	}
 	if `"`seed'"' == "" local __seed = floor(runiform() * 2147483646) + 1
 	else local __seed = `seed'
 	tempname B V T D Z ACC PP MB ZM ME VT ES ER EO RH QM CM LM CLS
 	capture noisily mata: LsmFit(__nwlsm_y, `__dir', __nwlsm_X, `dim', `nsample', `burnin', `interval', `__seed', `pilot', `plen', ///
-		`=("`randomstart'" != "")', strtoreal(tokens("`__opt'")), ("`B'", "`V'", "`T'", "`D'", "`Z'", "`ACC'", "`PP'", "`MB'", "`ZM'", "`ME'", "`VT'", "`ES'", "`ER'", "`EO'", "`RH'", "`QM'", "`CM'", "`LM'", "`CLS'"))
+		`=("`randomstart'" != "")', strtoreal(tokens("`__opt'")), ("`B'", "`V'", "`T'", "`D'", "`Z'", "`ACC'", "`PP'", "`MB'", "`ZM'", "`ME'", "`VT'", "`ES'", "`ER'", "`EO'", "`RH'", "`QM'", "`CM'", "`LM'", "`CLS'"), __nwlsm_tr)
 	local __rc = _rc
 	mata: st_local("__ny", strofreal(sum((__nwlsm_y :< .) :& (__nwlsm_y :!= .)) - sum(diagonal(__nwlsm_y) :< .)))
-	capture mata: mata drop __nwlsm_y __nwlsm_X
+	capture mata: mata drop __nwlsm_y __nwlsm_X __nwlsm_tr
 	if `__rc' exit `__rc'
 	if !`__dir' local __ny = `__ny' / 2
 	matrix colnames `B' = `__names'
@@ -190,20 +279,22 @@ program nwlsm, eclass
 	foreach __e of local __effs {
 		local __vn `__vn' `__e'_var
 	}
+	if `__fam' == 3 local __vn `__vn' dispersion
 	matrix rownames `VT' = `__vn'
 	matrix colnames `VT' = mean sd mcse lower95 upper95
 	ereturn post `B' `V', obs(`__ny')
 	ereturn local cmd "nwlsm"
-	ereturn local version "0.4.0"
+	ereturn local version "0.5.0"
 	ereturn local estat_cmd "nwlsm_estat"
-	ereturn local title "Latent space model (`=cond("`bilinear'" != "", "bilinear", "Euclidean distance")'), posterior by MCMC"
+	ereturn local title "Latent space model (`=cond("`bilinear'" != "", "bilinear", "Euclidean distance")'; `__famname' family), posterior by MCMC"
 	ereturn local latent = cond("`bilinear'" != "", "bilinear", "euclidean")
 	ereturn local effects "`__effs'"
+	ereturn local family "`__famname'"
 	ereturn local network "`netname'"
 	ereturn local directed = cond(`__dir', "directed", "undirected")
 	ereturn local covariates "`__names'"
 	ereturn local positions "minimum Kullback-Leibler (MKL) positions"
-	ereturn local start = cond("`randomstart'" != "", "random", "classical scaling of the geodesic distances")
+	ereturn local start = cond("`randomstart'" != "", "random", cond(`__fam' == 0, "classical scaling of the geodesic distances", "classical scaling of the tie values"))
 	ereturn scalar N_nodes = `nodes'
 	ereturn scalar dim = `dim'
 	ereturn scalar nsample = `__nsample_total'
@@ -211,6 +302,14 @@ program nwlsm, eclass
 	ereturn scalar nsample_chain = `__nsample_total' / `chains'
 	ereturn scalar threads = `=cond(`threads' > 0, `threads', 0)'
 	ereturn scalar clusters = `clusters'
+	if `__fam' == 2 & `"`trials'"' != "" {
+		capture confirm number `trials'
+		if !_rc ereturn scalar trials = `trials'
+	}
+	if `__fam' == 3 {
+		ereturn scalar dispvar = `dispvar'
+		ereturn scalar dispdf = `dispdf'
+	}
 	ereturn scalar burnin = `burnin'
 	ereturn scalar interval = `interval'
 	ereturn scalar seed = `__seed'

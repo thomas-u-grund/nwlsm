@@ -125,3 +125,78 @@ set.seed(76); fb2 <- ergmm(netb2 ~ euclidean(d = 2, G = 2) + absdiff("x"), contr
 write.csv(data.frame(mean = colMeans(fb2$sample$beta), sd = apply(fb2$sample$beta, 2, sd)), file.path(out, "clu36_c2_beta.csv"))
 # priors of the cluster model (pins Z.var = 0.125 (n/G)^(2/d), df = sqrt(n/G), Z.mean.var = 2 * 0.125 n^(2/d), pK = sqrt(n/G))
 cat("clusters done\n")
+
+# ---- Milestone 4 fixtures (nwlsm 0.5.0): valued networks, families Poisson, binomial (trials) and normal ----
+# To run this section alone, source lines 1-4 (packages, out, ctl) and then this block.
+# Valued data are stored as full n x n value matrices (<name>_y.csv), trials as <name>_tr.csv. Two chains per case; the files are as for 0.3.0 plus
+# <name>_mklpar.csv (latentnet's minimum-KL coefficients and effects) and the dispersion in <name>_vars.csv.
+fam_fixture <- function(name, Y, dir, formula_str, family, fam.par = NULL, seed, xv = NULL, trials = NULL) {
+  n <- nrow(Y)
+  net <- network(Y, directed = dir, matrix.type = "adjacency", ignore.eval = FALSE, names.eval = "w")
+  if (!is.null(xv)) set.vertex.attribute(net, "x", xv)
+  write.csv(Y, file.path(out, paste0(name, "_y.csv")), row.names = FALSE)
+  if (!is.null(xv)) write.csv(data.frame(x = xv), file.path(out, paste0(name, "_x.csv")), row.names = FALSE)
+  if (!is.null(trials) && length(trials) > 1) write.csv(trials, file.path(out, paste0(name, "_tr.csv")), row.names = FALSE)
+  fit1 <- function(sd) { set.seed(sd); ergmm(as.formula(formula_str), response = "w", family = family, fam.par = fam.par, control = ctl) }
+  f <- fit1(seed)
+  b <- f$sample$beta; ns <- dim(f$sample$Z)[1]
+  D <- matrix(0, n, n); for (s in seq_len(ns)) D <- D + as.matrix(dist(f$sample$Z[s, , ])); D <- D / ns
+  write.csv(D, file.path(out, paste0(name, "_meandist.csv")), row.names = FALSE)
+  write.csv(data.frame(mean = colMeans(b), sd = apply(b, 2, sd)), file.path(out, paste0(name, "_beta.csv")))
+  write.csv(data.frame(llk_mean = mean(f$sample$lpY), llk_sd = sd(f$sample$lpY)), file.path(out, paste0(name, "_llk.csv")), row.names = FALSE)
+  vars <- function(f) { v <- data.frame(name = "Z.var", mean = mean(f$sample$Z.var), sd = sd(f$sample$Z.var))
+    for (e in c("sender.var", "receiver.var", "sociality.var", "dispersion")) if (!is.null(f$sample[[e]])) v <- rbind(v, data.frame(name = e, mean = mean(f$sample[[e]]), sd = sd(f$sample[[e]])))
+    v }
+  write.csv(vars(f), file.path(out, paste0(name, "_vars.csv")), row.names = FALSE)
+  P <- matrix(0, n, n)
+  for (s in seq_len(ns)) {
+    th <- list(Z = f$sample$Z[s, , ], beta = f$sample$beta[s, ])
+    for (e in c("sender", "receiver", "sociality")) if (!is.null(f$sample[[e]])) th[[e]] <- f$sample[[e]][s, ]
+    eta <- latentnet:::ergmm.eta(f$model, th)
+    P <- P + switch(family, Poisson = exp(eta), binomial = trials * plogis(eta), normal = eta)
+  }
+  write.csv(P / ns, file.path(out, paste0(name, "_P.csv")), row.names = FALSE)
+  eff <- list(); for (e in c("sender", "receiver", "sociality")) if (!is.null(f$sample[[e]])) eff[[e]] <- colMeans(f$sample[[e]])
+  if (length(eff)) write.csv(as.data.frame(eff), file.path(out, paste0(name, "_effects.csv")), row.names = FALSE)
+  write.csv(f$mkl$Z, file.path(out, paste0(name, "_mklZ.csv")), row.names = FALSE)
+  mp <- list(beta = f$mkl$beta); for (e in c("sender", "receiver", "sociality")) if (!is.null(f$mkl[[e]])) mp[[e]] <- f$mkl[[e]]
+  mx <- max(lengths(mp)); write.csv(as.data.frame(lapply(mp, function(v) c(v, rep(NA, mx - length(v))))), file.path(out, paste0(name, "_mklpar.csv")), row.names = FALSE)
+  f2 <- fit1(seed + 1)
+  b2 <- f2$sample$beta
+  write.csv(data.frame(mean = colMeans(b2), sd = apply(b2, 2, sd)), file.path(out, paste0(name, "_c2_beta.csv")))
+  write.csv(data.frame(llk_mean = mean(f2$sample$lpY), llk_sd = sd(f2$sample$lpY)), file.path(out, paste0(name, "_c2_llk.csv")), row.names = FALSE)
+  write.csv(vars(f2), file.path(out, paste0(name, "_c2_vars.csv")), row.names = FALSE)
+  Z <- f2$sample$Z; D2 <- matrix(0, n, n); for (s in seq_len(dim(Z)[1])) D2 <- D2 + as.matrix(dist(Z[s, , ])); write.csv(D2 / dim(Z)[1], file.path(out, paste0(name, "_c2_meandist.csv")), row.names = FALSE)
+  if (!is.null(f$mkl$Z.K)) { zk <- f$mkl$Z.K; write.csv(data.frame(class = if (is.matrix(zk)) max.col(zk) else as.integer(zk)), file.path(out, paste0(name, "_class.csv")), row.names = FALSE) }
+  invisible(f)
+}
+# (a) Poisson, directed, n = 30, d = 2, node covariate (absdiff)
+set.seed(81); n <- 30; z <- matrix(rnorm(n * 2), n, 2); x <- rnorm(n)
+eta <- 0.4 + 0.4 * abs(outer(x, x, "-")) - as.matrix(dist(z)); Y <- matrix(rpois(n * n, exp(eta)), n, n); diag(Y) <- 0
+fam_fixture("pois30", Y, TRUE, 'net ~ euclidean(d = 2) + absdiff("x")', "Poisson", seed = 101, xv = x)
+# (b) Poisson, undirected, n = 30, with sociality
+set.seed(82); so <- rnorm(n, 0, 0.5); z <- matrix(rnorm(n * 2), n, 2)
+eta <- 0.0 + outer(so, so, "+") - as.matrix(dist(z)); Y <- matrix(rpois(n * n, exp(eta)), n, n); Y[lower.tri(Y, TRUE)] <- 0; Y <- Y + t(Y)
+fam_fixture("pois30s", Y, FALSE, 'net ~ euclidean(d = 2) + rsociality', "Poisson", seed = 111)
+# (c) binomial, 6 trials, directed, n = 30, sender and receiver effects, node covariate
+set.seed(83); z <- matrix(rnorm(n * 2), n, 2); x <- rnorm(n); se <- rnorm(n, 0, 0.6); re <- rnorm(n, 0, 0.5)
+eta <- -0.3 + outer(se, re, "+") + 0.4 * abs(outer(x, x, "-")) - as.matrix(dist(z)); Y <- matrix(rbinom(n * n, 6, plogis(eta)), n, n); diag(Y) <- 0
+fam_fixture("bin30", Y, TRUE, 'net ~ euclidean(d = 2) + rsender + rreceiver + absdiff("x")', "binomial", fam.par = list(trials = 6), seed = 121, xv = x, trials = 6)
+# (d) binomial, trials matrix (3 to 8), undirected, n = 25
+set.seed(84); n2 <- 25; z <- matrix(rnorm(n2 * 2), n2, 2); tr <- matrix(sample(3:8, n2 * n2, TRUE), n2, n2); tr[lower.tri(tr)] <- t(tr)[lower.tri(tr)]
+eta <- 0.2 - as.matrix(dist(z)); Y <- matrix(rbinom(n2 * n2, tr, plogis(eta)), n2, n2); Y[lower.tri(Y, TRUE)] <- 0; Y <- Y + t(Y); diag(Y) <- 0
+fam_fixture("bin25m", Y, FALSE, 'net ~ euclidean(d = 2)', "binomial", fam.par = list(trials = tr), seed = 131, trials = tr)
+# (e) normal, directed, n = 30, node covariate; prior.var = 1, prior.var.df = 3
+set.seed(85); n <- 30; z <- matrix(rnorm(n * 2), n, 2); x <- rnorm(n)
+Y <- 1 + 0.5 * abs(outer(x, x, "-")) - as.matrix(dist(z)) + matrix(rnorm(n * n, 0, 0.7), n, n); diag(Y) <- 0
+fam_fixture("gau30", Y, TRUE, 'net ~ euclidean(d = 2) + absdiff("x")', "normal", fam.par = list(prior.var = 1, prior.var.df = 3), seed = 141, xv = x)
+# (f) normal, undirected, n = 30, sociality
+set.seed(86); so <- rnorm(n, 0, 0.5); z <- matrix(rnorm(n * 2), n, 2)
+Y <- 0.5 + outer(so, so, "+") - as.matrix(dist(z)) + matrix(rnorm(n * n, 0, 0.5), n, n); Y <- (Y + t(Y)) / 2 + 0; Y[lower.tri(Y, TRUE)] <- 0; Y <- Y + t(Y)
+fam_fixture("gau30s", Y, FALSE, 'net ~ euclidean(d = 2) + rsociality', "normal", fam.par = list(prior.var = 0.5, prior.var.df = 4), seed = 151)
+# (g) Poisson with two latent clusters, undirected, n = 36
+set.seed(87); n <- 36; truth <- rep(1:2, each = 18); ctr <- rbind(c(-3.5, 0), c(3.5, 0)); z <- ctr[truth, ] + matrix(rnorm(n * 2, 0, 0.7), n, 2)
+eta <- 1.0 - as.matrix(dist(z)); Y <- matrix(rpois(n * n, exp(eta)), n, n); Y[lower.tri(Y, TRUE)] <- 0; Y <- Y + t(Y)
+write.csv(data.frame(truth = truth), file.path(out, "poisclu36_truth.csv"), row.names = FALSE)
+fam_fixture("poisclu36", Y, FALSE, 'net ~ euclidean(d = 2, G = 2)', "Poisson", seed = 161)
+cat("valued done\n")

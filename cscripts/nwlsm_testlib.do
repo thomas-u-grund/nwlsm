@@ -91,3 +91,14 @@ real scalar lsmt_ll(real matrix y, real scalar dir, real matrix X, real rowvecto
 	return(t)
 }
 end
+
+capture program drop lsmt_mkvnet
+* lsmt_mkvnet name, y(csv) dir(0|1): valued network from a full n x n value matrix stored as csv (header row, n columns)
+program lsmt_mkvnet
+	syntax name(name=nm), Y(string) DIR(integer)
+	preserve
+	import delimited `"`y'"', clear varnames(1)
+	if `dir' nwset *, name(`nm') directed valued
+	else nwset *, name(`nm') undirected valued
+	restore
+end

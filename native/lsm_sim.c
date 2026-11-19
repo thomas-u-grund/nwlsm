@@ -59,7 +59,7 @@
 #include <unistd.h>
 #endif
 
-#define LSM_PROTOCOL 3
+#define LSM_PROTOCOL 4
 #define HDR 16
 
 /* Threads (pthreads; _beginthreadex on Windows). Only the independent work items (chains, Kullback-Leibler blocks, MKL starts) use them. */
@@ -84,6 +84,9 @@ static int ncores(void) { long c = sysconf(_SC_NPROCESSORS_ONLN); return c > 0 ?
 
 typedef struct {
 	int n, dir, nc, K, d, flags, lt, G;
+	int fam; /* 0 Bernoulli, 1 Poisson, 2 binomial, 3 normal */
+	double dscale, ddf, disp0, dispm; /* normal family: prior scale and df of the dispersion (variance), its start, its posterior mean (MKL fit) */
+	double *yv, *tr, *lcst; /* valued families: values, trials (binomial), per-dyad constant of the log likelihood */
 	double cscale, cdf, cmv, calpha; /* latent clusters: prior scale and df of the cluster variances, variance of the cluster means, Dirichlet parameter */
 	int act[3];
 	double scale, df, s2;
@@ -94,7 +97,7 @@ typedef struct {
 	signed char *y;
 } Model;
 
-static void model_free(Model *g) { free(g->pvar); free(g->beta); free(g->Z); free(g->x); free(g->e0); free(g->y); }
+static void model_free(Model *g) { free(g->yv); free(g->tr); free(g->lcst); free(g->pvar); free(g->beta); free(g->Z); free(g->x); free(g->e0); free(g->y); }
 
 /* ---- random numbers: xoshiro256**, seeded by splitmix64 ---- */
 typedef struct { uint64_t s[4]; int have; double spare; } Rng;
@@ -129,7 +132,33 @@ static double rgamma(Rng *r, double a) { /* Marsaglia and Tsang */
 
 /* log-likelihood contribution of one (ordered) dyad: y eta - log(1 + exp(eta)) */
 static inline double log1pexp(double eta) { return eta > 0.0 ? eta + log1p(exp(-eta)) : log1p(exp(eta)); }
-static inline double llterm(int y, double eta) { return (y == 1 ? eta : 0.0) - log1pexp(eta); }
+/* log-likelihood term of dyad ij at linear predictor eta, by family (disp: dispersion = variance of the normal family) */
+static inline double llf(const Model *g, double disp, size_t ij, double eta) {
+	switch (g->fam) {
+	case 1: return g->yv[ij] * eta - exp(eta) + g->lcst[ij];
+	case 2: return g->yv[ij] * eta - g->tr[ij] * log1pexp(eta) + g->lcst[ij];
+	case 3: { double r = g->yv[ij] - eta; return -0.5 * r * r / disp - 0.5 * log(disp) + g->lcst[ij]; }
+	default: return (g->y[ij] == 1 ? eta : 0.0) - log1pexp(eta);
+	}
+}
+/* mean of the family at linear predictor eta */
+static inline double meanf(const Model *g, size_t ij, double eta) {
+	switch (g->fam) {
+	case 1: return exp(eta);
+	case 2: return g->tr[ij] / (1.0 + exp(-eta));
+	case 3: return eta;
+	default: return 1.0 / (1.0 + exp(-eta));
+	}
+}
+/* Kullback-Leibler term (up to a constant) of the target mean ey against eta: -(ey eta - A(eta)) / scale */
+static inline double klf(const Model *g, size_t ij, double eta, double ey) {
+	switch (g->fam) {
+	case 1: return exp(eta) - ey * eta;
+	case 2: return g->tr[ij] * log1pexp(eta) - ey * eta;
+	case 3: return (0.5 * eta * eta - ey * eta) / g->dispm;
+	default: return log1pexp(eta) - ey * eta;
+	}
+}
 
 /* the latent term t(z_i, z_j): distance (type 0) or minus the inner product (type 1) */
 static inline double latt(int lt, int d, const double *a, const double *b) {
@@ -165,6 +194,7 @@ static void par_run(int T, int count, void (*fn)(void *, int), void *ctx) {
 typedef struct {
 	const Model *g;
 	double *beta, *Z, *eff[3], *lin, *D, *L, *tmpD, *tmpL, *tmpL2;
+	double disp; /* dispersion of the normal family */
 	int thr; /* threads for the per-dyad passes of this chain (beta updates) */
 } State;
 
@@ -198,12 +228,29 @@ static void state_rebuild(State *s) {
 		l = linpred(g, s->beta, (const double *const *)s->eff, i, j);
 		s->lin[i * n + j] = l;
 		s->D[i * n + j] = latt(g->lt, g->d, s->Z + i * g->d, s->Z + j * g->d);
-		s->L[i * n + j] = g->y[i * n + j] < 0 ? 0.0 : llterm(g->y[i * n + j], l - s->D[i * n + j]);
+		s->L[i * n + j] = g->y[i * n + j] < 0 ? 0.0 : llf(g, s->disp, (size_t)i * n + j, l - s->D[i * n + j]);
 	}
 }
 static double state_ll(const State *s) {
 	const Model *g = s->g; int n = g->n, i, j; double t = 0.0;
 	for (i = 0; i < n; i++) for (j = g->dir ? 0 : i + 1; j < n; j++) if (i != j) t += s->L[i * n + j];
+	return t;
+}
+/* normal family: refresh the cached terms after a change of the dispersion; residual sum of squares and the number of counted dyads */
+static void state_relL(State *s) {
+	const Model *g = s->g; int n = g->n, i, j;
+	for (i = 0; i < n; i++) for (j = 0; j < n; j++) {
+		if (i == j || g->y[i * n + j] < 0) continue;
+		s->L[i * n + j] = llf(g, s->disp, (size_t)i * n + j, s->lin[i * n + j] - s->D[i * n + j]);
+	}
+}
+static double state_ss(const State *s, double *cnt) {
+	const Model *g = s->g; int n = g->n, i, j; double t = 0.0, m = 0.0;
+	for (i = 0; i < n; i++) for (j = g->dir ? 0 : i + 1; j < n; j++) {
+		if (i == j || g->y[i * n + j] < 0) continue;
+		{ double r = g->yv[(size_t)i * n + j] - (s->lin[i * n + j] - s->D[i * n + j]); t += r * r; m += 1.0; }
+	}
+	*cnt = m;
 	return t;
 }
 static double sumsq(const double *Z, int m) { double t = 0; int k; for (k = 0; k < m; k++) t += Z[k] * Z[k]; return t; }
@@ -216,8 +263,8 @@ static double actor_dll(State *s, int i, const double *znew) {
 		s->tmpD[j] = 0; s->tmpL[j] = 0; s->tmpL2[j] = 0;
 		if (j == i) continue;
 		dn = latt(g->lt, d, znew, s->Z + j * d); s->tmpD[j] = dn;
-		if (g->y[i * n + j] >= 0) { s->tmpL[j] = llterm(g->y[i * n + j], s->lin[i * n + j] - dn); dll += s->tmpL[j] - s->L[i * n + j]; }
-		if (g->dir && g->y[j * n + i] >= 0) { s->tmpL2[j] = llterm(g->y[j * n + i], s->lin[j * n + i] - dn); dll += s->tmpL2[j] - s->L[j * n + i]; }
+		if (g->y[i * n + j] >= 0) { s->tmpL[j] = llf(g, s->disp, (size_t)i * n + j, s->lin[i * n + j] - dn); dll += s->tmpL[j] - s->L[i * n + j]; }
+		if (g->dir && g->y[j * n + i] >= 0) { s->tmpL2[j] = llf(g, s->disp, (size_t)j * n + i, s->lin[j * n + i] - dn); dll += s->tmpL2[j] - s->L[j * n + i]; }
 	}
 	return dll;
 }
@@ -239,10 +286,10 @@ static double eff_dll(State *s, int t, int i, double delta) {
 		s->tmpL[j] = 0; s->tmpL2[j] = 0;
 		if (j == i) continue;
 		if (t == 0 || t == 2) {
-			if (g->y[i * n + j] >= 0) { s->tmpL[j] = llterm(g->y[i * n + j], s->lin[i * n + j] + delta - s->D[i * n + j]); dll += s->tmpL[j] - s->L[i * n + j]; }
+			if (g->y[i * n + j] >= 0) { s->tmpL[j] = llf(g, s->disp, (size_t)i * n + j, s->lin[i * n + j] + delta - s->D[i * n + j]); dll += s->tmpL[j] - s->L[i * n + j]; }
 		}
 		if (t == 1 || (t == 2 && g->dir)) {
-			if (g->y[j * n + i] >= 0) { s->tmpL2[j] = llterm(g->y[j * n + i], s->lin[j * n + i] + delta - s->D[j * n + i]); dll += s->tmpL2[j] - s->L[j * n + i]; }
+			if (g->y[j * n + i] >= 0) { s->tmpL2[j] = llf(g, s->disp, (size_t)j * n + i, s->lin[j * n + i] + delta - s->D[j * n + i]); dll += s->tmpL2[j] - s->L[j * n + i]; }
 		}
 	}
 	return dll;
@@ -282,7 +329,7 @@ static void beta_blk(void *ctx, int b) {
 		} else {
 			double nl;
 			if (g->y[ij] < 0) { J->newL[ij] = 0; continue; }
-			nl = llterm(g->y[ij], s->lin[ij] + delta * (xk ? xk[ij] : 1.0) - s->D[ij]);
+			nl = llf(g, s->disp, ij, s->lin[ij] + delta * (xk ? xk[ij] : 1.0) - s->D[ij]);
 			J->newL[ij] = nl; dll += nl - s->L[ij];
 		}
 	}
@@ -318,9 +365,9 @@ static void mkl_blk(void *ctx, int b) {
 		eta = linpred(g, J->beta, J->eff, i, j);
 		lt = latt(g->lt, d, Z + i * d, Z + j * d);
 		eta -= lt;
-		f += EY[i * n + j] * eta - log1pexp(eta);
+		f -= klf(g, (size_t)i * n + j, eta, EY[i * n + j]);
 		if (!grad) continue;
-		ge = EY[i * n + j] - 1.0 / (1.0 + exp(-eta));
+		ge = (EY[i * n + j] - meanf(g, (size_t)i * n + j, eta)) / (g->fam == 3 ? g->dispm : 1.0);
 		grad[goff] += ge;
 		for (k = 0; k < g->nc; k++) grad[goff + 1 + k] += ge * g->x[(size_t)k * n * n + (size_t)i * n + j];
 		t = goff + g->K;
@@ -438,8 +485,10 @@ static int model_read(Model *g, long L) {
 	if ((int)h[0] != LSM_PROTOCOL) return 198;
 	n = (int)h[1]; g->n = n; g->dir = (int)h[2]; g->nc = (int)h[3]; g->d = (int)h[4]; g->K = g->nc + 1;
 	g->flags = (int)h[5]; g->lt = (int)h[6]; g->G = (int)h[7]; g->cscale = h[8]; g->cdf = h[9]; g->cmv = h[10]; g->calpha = h[11];
+	g->fam = (int)h[12]; g->dscale = h[13]; g->ddf = h[14]; g->disp0 = h[15]; g->dispm = h[15];
 	for (t = 0; t < 3; t++) g->act[t] = (g->flags >> t) & 1;
 	if (n < 3 || g->d < 1 || g->nc < 0 || (g->lt != 0 && g->lt != 1) || g->G < 0 || g->G > 12 || (g->G > 0 && (g->cscale <= 0 || g->cdf <= 0 || g->cmv <= 0 || g->calpha <= 0))) return 198;
+	if (g->fam < 0 || g->fam > 3 || (g->fam == 3 && (g->dscale <= 0 || g->ddf <= 0 || g->disp0 <= 0))) return 198;
 	pos = HDR;
 	g->pvar = malloc(sizeof(double) * g->K); g->beta = malloc(sizeof(double) * g->K); g->Z = malloc(sizeof(double) * n * g->d);
 	g->e0 = malloc(sizeof(double) * 3 * n);
@@ -454,17 +503,35 @@ static int model_read(Model *g, long L) {
 		SF_vdata(1, (ST_int)(++pos), &v); g->es[t] = v; SF_vdata(1, (ST_int)(++pos), &v); g->edf[t] = v; SF_vdata(1, (ST_int)(++pos), &v); g->ev0[t] = v;
 	}
 	for (m = 0; m < 3L * n; m++) { SF_vdata(1, (ST_int)(++pos), &v); g->e0[m] = g->act[m / n] ? v : 0.0; }
-	for (m = 0; m < (long)n * n; m++) { SF_vdata(1, (ST_int)(++pos), &v); g->y[m] = (signed char)(v < -0.5 ? -1 : (v > 0.5 ? 1 : 0)); }
+	if (g->fam == 0) for (m = 0; m < (long)n * n; m++) { SF_vdata(1, (ST_int)(++pos), &v); g->y[m] = (signed char)(v < -0.5 ? -1 : (v > 0.5 ? 1 : 0)); }
+	else {
+		g->yv = calloc((size_t)n * n, sizeof(double)); g->tr = calloc((size_t)n * n, sizeof(double)); g->lcst = calloc((size_t)n * n, sizeof(double));
+		if (!g->yv || !g->tr || !g->lcst) return 909;
+		for (m = 0; m < (long)n * n; m++) { SF_vdata(1, (ST_int)(++pos), &v); g->yv[m] = v; }
+		for (m = 0; m < (long)n * n; m++) { SF_vdata(1, (ST_int)(++pos), &v); g->y[m] = (signed char)(v > 0.5 ? 0 : -1); }
+		if (g->fam == 2) for (m = 0; m < (long)n * n; m++) { SF_vdata(1, (ST_int)(++pos), &v); g->tr[m] = v; }
+	}
 	for (m = 0; m < (long)n * n * g->nc; m++) { SF_vdata(1, (ST_int)(++pos), &v); g->x[m] = v; }
 	}
 	if (pos > L) return 198;
 	if (!g->dir) {
 		for (i = 0; i < n; i++) for (j = i + 1; j < n; j++) {
 			g->y[j * n + i] = g->y[i * n + j];
+			if (g->fam > 0) { g->yv[j * n + i] = g->yv[i * n + j]; g->tr[j * n + i] = g->tr[i * n + j]; }
 			for (k = 0; k < g->nc; k++) g->x[(size_t)k * n * n + j * n + i] = g->x[(size_t)k * n * n + i * n + j];
 		}
 	}
 	for (i = 0; i < n; i++) g->y[i * n + i] = -1;
+	if (g->fam > 0) {
+		for (m = 0; m < (long)n * n; m++) {
+			double yy = g->yv[m], tt = g->tr[m];
+			if (g->y[m] < 0) continue;
+			if (g->fam == 3) { g->lcst[m] = -0.5 * log(6.283185307179586); continue; }
+			if (yy < 0 || yy != floor(yy)) return 198;
+			if (g->fam == 1) g->lcst[m] = -lgamma(yy + 1.0);
+			else { if (tt < yy || tt != floor(tt)) return 198; g->lcst[m] = lgamma(tt + 1.0) - lgamma(yy + 1.0) - lgamma(tt - yy + 1.0); }
+		}
+	}
 	return 0;
 }
 
@@ -547,7 +614,7 @@ static void clu_gibbs(Rng *r, const Model *g, const double *Z, Clu *c) {
 /* ---- one chain ---- */
 typedef struct { int S, burn, intv, pil, plen, ithr, mthr; double dz, db, de, tgt; } Cfg;
 typedef struct {
-	double *dBeta, *dLlk, *dS2, *dEv, *dZ, *dE, *dMu, *dLam, *dK; /* slices of the pooled draw arrays (draw-major) */
+	double *dDisp, *dBeta, *dLlk, *dS2, *dEv, *dZ, *dE, *dMu, *dLam, *dK; /* slices of the pooled draw arrays (draw-major) */
 	double *Dsum, *EYsum;                                          /* own, n x n */
 	uint64_t seed0;
 	double accZ, accB[64], accE[3], stepZ, stepB[64], stepE[3];
@@ -568,7 +635,7 @@ static void chain_run(void *ctx, int idx) {
 	o->Dsum = calloc((size_t)n * n, sizeof(double)); o->EYsum = calloc((size_t)n * n, sizeof(double));
 	if (!db || !newL || !o->Dsum || !o->EYsum || !state_alloc(&s, gp) || !clu_alloc(&cl, gp)) { o->rc = 909; goto done; }
 	rng_seed(&rg, J->seed);
-	s.thr = cf->ithr;
+	s.thr = cf->ithr; s.disp = g.disp0;
 	memcpy(s.beta, g.beta, sizeof(double) * K); memcpy(s.Z, g.Z, sizeof(double) * nd);
 	for (t = 0; t < 3; t++) memcpy(s.eff[t], g.e0 + (long)t * n, sizeof(double) * n);
 	if (J->seed != J->o->seed0) { /* chains after the first start from over-dispersed positions */
@@ -609,6 +676,7 @@ static void chain_run(void *ctx, int idx) {
 				lu = log(runif(&rg));
 				if (lu < dll + dpr) { beta_commit(&s, k, delta, newL); accBn[k]++; }
 			}
+			if (g.fam == 3) { double cnt, ss = state_ss(&s, &cnt); s.disp = gibbs_var(&rg, g.dscale, g.ddf, ss, cnt); state_relL(&s); }
 			if (G > 0) clu_gibbs(&rg, gp, s.Z, &cl);
 			else s2 = gibbs_var(&rg, g.scale, g.df, sumsq(s.Z, n * d), (double)n * d);
 			for (t = 0; t < 3; t++) if (g.act[t]) ev[t] = gibbs_var(&rg, g.es[t], g.edf[t], sumsq(s.eff[t], n), (double)n);
@@ -623,7 +691,7 @@ static void chain_run(void *ctx, int idx) {
 			if (ph == 2 && (sw + 1) % intv == 0) {
 				long dr = (sw + 1) / intv - 1; int j;
 				for (k = 0; k < K; k++) o->dBeta[dr * K + k] = s.beta[k];
-				o->dLlk[dr] = state_ll(&s);
+				o->dLlk[dr] = state_ll(&s); o->dDisp[dr] = s.disp;
 				if (G > 0) {
 					for (k = 0; k < G; k++) { o->dS2[dr * ng + k] = cl.s2[k]; o->dLam[dr * G + k] = cl.lam[k]; }
 					memcpy(o->dMu + dr * G * d, cl.mu, sizeof(double) * (size_t)G * d);
@@ -634,7 +702,7 @@ static void chain_run(void *ctx, int idx) {
 				for (t = 0; t < 3; t++) memcpy(o->dE + (dr * 3 + t) * n, s.eff[t], sizeof(double) * n);
 				for (i = 0; i < n; i++) for (j = 0; j < n; j++) {
 					o->Dsum[i * n + j] += s.D[i * n + j];
-					if (i != j) o->EYsum[i * n + j] += 1.0 / (1.0 + exp(-(s.lin[i * n + j] - s.D[i * n + j])));
+					if (i != j) o->EYsum[i * n + j] += meanf(&g, (size_t)i * n + j, s.lin[i * n + j] - s.D[i * n + j]);
 				}
 			}
 		}
@@ -659,7 +727,7 @@ static void kl_block(void *ctx, int b) {
 			double eta;
 			if (i == j || g->y[i * n + j] < 0) continue;
 			eta = linpred(g, be, ef, i, j) - latt(g->lt, d, Zd + i * d, Zd + j * d);
-			kl += log1pexp(eta) - J->EY[i * n + j] * eta;
+			kl += klf(g, (size_t)i * n + j, eta, J->EY[i * n + j]);
 		}
 		J->kls[dr] = kl;
 	}
@@ -676,10 +744,10 @@ static void mkl_start(void *ctx, int c) {
 }
 
 static int run_chains(const Model *gp, long L) {
-	const Model g = *gp;
+	Model g = *gp;
 	int n = g.n, d = g.d, K = g.K, G = g.G, ng = G > 0 ? G : 1, na = g.act[0] + g.act[1] + g.act[2], q, k, t, i, j, C, T, rc = 0, Sc;
 	long nd = (long)n * d, S, dr, m, pos = 0;
-	double a[13], *pBeta = NULL, *pLlk = NULL, *pS2 = NULL, *pEv = NULL, *pZ = NULL, *pE = NULL, *pMu = NULL, *pLam = NULL, *pK = NULL;
+	double a[13], *pDisp = NULL, *pBeta = NULL, *pLlk = NULL, *pS2 = NULL, *pEv = NULL, *pZ = NULL, *pE = NULL, *pMu = NULL, *pLam = NULL, *pK = NULL;
 	double *EY = NULL, *Dm = NULL, *kls = NULL, *xs = NULL, *fo = NULL; int *its = NULL; long *sel = NULL;
 	COut *outs = NULL; CJob *jobs = NULL; Cfg cf; char *tok;
 	(void)L;
@@ -697,14 +765,15 @@ static int run_chains(const Model *gp, long L) {
 	  cf.ithr = inner < cap ? inner : cap; if (cf.ithr > NBLK) cf.ithr = NBLK;
 	}
 	outs = calloc(C, sizeof(COut)); jobs = calloc(C, sizeof(CJob));
+	pDisp = malloc(sizeof(double) * S);
 	pBeta = malloc(sizeof(double) * S * K); pLlk = malloc(sizeof(double) * S); pS2 = malloc(sizeof(double) * S * ng); pEv = malloc(sizeof(double) * S * 3);
 	pZ = malloc(sizeof(double) * S * nd); pE = malloc(sizeof(double) * S * 3 * n);
 	pMu = malloc(sizeof(double) * S * ng * d); pLam = malloc(sizeof(double) * S * ng); pK = malloc(sizeof(double) * S * n);
 	EY = calloc((size_t)n * n, sizeof(double)); Dm = calloc((size_t)n * n, sizeof(double));
-	if (!outs || !jobs || !pBeta || !pLlk || !pS2 || !pEv || !pZ || !pE || !pMu || !pLam || !pK || !EY || !Dm) { SF_error("lsm_sim: not enough memory\n"); rc = 909; goto cleanup; }
+	if (!outs || !jobs || !pDisp || !pBeta || !pLlk || !pS2 || !pEv || !pZ || !pE || !pMu || !pLam || !pK || !EY || !Dm) { SF_error("lsm_sim: not enough memory\n"); rc = 909; goto cleanup; }
 	for (k = 0; k < C; k++) {
 		long o = (long)k * Sc;
-		outs[k].dBeta = pBeta + o * K; outs[k].dLlk = pLlk + o; outs[k].dS2 = pS2 + o * ng; outs[k].dEv = pEv + o * 3; outs[k].dZ = pZ + o * nd;
+		outs[k].dDisp = pDisp + o; outs[k].dBeta = pBeta + o * K; outs[k].dLlk = pLlk + o; outs[k].dS2 = pS2 + o * ng; outs[k].dEv = pEv + o * 3; outs[k].dZ = pZ + o * nd;
 		outs[k].dE = pE + o * 3 * n; outs[k].dMu = pMu + o * ng * d; outs[k].dLam = pLam + o * ng; outs[k].dK = pK + o * n;
 		jobs[k].g = gp; jobs[k].cfg = &cf; jobs[k].seed = (uint64_t)a[0] + 1000003ULL * (uint64_t)k; jobs[k].o = &outs[k];
 		outs[k].seed0 = (uint64_t)a[0];
@@ -715,8 +784,9 @@ static int run_chains(const Model *gp, long L) {
 	/* ---- minimum Kullback-Leibler estimate ---- */
 	{
 		int P = mkl_P(&g), ms = (int)a[10], c, nblk, itbest = 0; long bi = 0; double fbest = 0, ms2 = 0.0, mev[3] = {0, 0, 0};
-		Model gm = g; KLJob kj; MKJob mj;
-		for (dr = 0; dr < S; dr++) { for (k = 0; k < ng; k++) ms2 += pS2[dr * ng + k] / ((double)S * ng); for (t = 0; t < 3; t++) mev[t] += pEv[dr * 3 + t] / (double)S; }
+		Model gm; KLJob kj; MKJob mj;
+		for (dr = 0; dr < S; dr++) { g.dispm += pDisp[dr] / (double)S; for (k = 0; k < ng; k++) ms2 += pS2[dr * ng + k] / ((double)S * ng); for (t = 0; t < 3; t++) mev[t] += pEv[dr * 3 + t] / (double)S; }
+		g.dispm -= g.disp0; gm = g; /* dispm: posterior mean of the dispersion (the objective of the normal family is scaled by it) */
 		/* a very weak ridge (1/1000 of the posterior precision) keeps the optimiser from running away along flat directions */
 		gm.mthr = 1; gm.rz = 1e-3 / ms2; for (t = 0; t < 3; t++) gm.re[t] = g.act[t] ? 1e-3 / mev[t] : 0.0;
 		kls = malloc(sizeof(double) * S);
@@ -752,6 +822,7 @@ static int run_chains(const Model *gp, long L) {
 #define PUT(v) SF_vstore(2, (ST_int)(++pos), (v))
 		  for (m = 0; m < S * K; m++) PUT(pBeta[m]);
 		  for (m = 0; m < S; m++) PUT(pLlk[m]);
+		  for (m = 0; m < S; m++) PUT(pDisp[m]);
 		  for (m = 0; m < S * ng; m++) PUT(pS2[m]);
 		  for (t = 0; t < 3; t++) for (dr = 0; dr < S; dr++) PUT(pEv[dr * 3 + t]);
 		  for (m = 0; m < S * nd; m++) PUT(pZ[m]);
@@ -771,7 +842,7 @@ static int run_chains(const Model *gp, long L) {
 	(void)na; (void)j;
 cleanup:
 	if (outs) for (k = 0; k < C; k++) { free(outs[k].Dsum); free(outs[k].EYsum); }
-	free(outs); free(jobs); free(pBeta); free(pLlk); free(pS2); free(pEv); free(pZ); free(pE); free(pMu); free(pLam); free(pK);
+	free(outs); free(jobs); free(pDisp); free(pBeta); free(pLlk); free(pS2); free(pEv); free(pZ); free(pE); free(pMu); free(pLam); free(pK);
 	free(EY); free(Dm); free(kls); free(xs); free(fo); free(its); free(sel);
 	return rc;
 }
@@ -794,7 +865,7 @@ STDLL stata_call(int argc, char *argv[]) {
 	rc = model_read(&g, L);
 	if (rc) { free(buf); SF_error("lsm_sim: the model block is invalid (plugin and package versions do not match?)\n"); return rc; }
 	if (!state_alloc(&s, &g)) { free(buf); model_free(&g); SF_error("lsm_sim: not enough memory\n"); return 909; }
-	memcpy(s.beta, g.beta, sizeof(double) * g.K); memcpy(s.Z, g.Z, sizeof(double) * g.n * g.d);
+	memcpy(s.beta, g.beta, sizeof(double) * g.K); memcpy(s.Z, g.Z, sizeof(double) * g.n * g.d); s.disp = g.disp0;
 	{ int t; for (t = 0; t < 3; t++) memcpy(s.eff[t], g.e0 + (long)t * g.n, sizeof(double) * g.n); }
 	state_rebuild(&s);
 	{

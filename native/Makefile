@@ -21,6 +21,7 @@ macos-lsm_sim:
 		-DSYSTEM=APPLEMAC -target x86_64-apple-macos10.11 $(CFLAGS)
 	$(CC) -bundle -o lsm_sim.arm64 lsm_sim.c spi/stplugin.c \
 		-DSYSTEM=APPLEMAC -target arm64-apple-macos11 $(CFLAGS)
+	rm -f ../lib/plugins/macos/lsm_sim_macos.plugin
 	lipo -create -output ../lib/plugins/macos/lsm_sim_macos.plugin lsm_sim.x86_64 lsm_sim.arm64
 	codesign -s - ../lib/plugins/macos/lsm_sim_macos.plugin
 	rm -f lsm_sim.x86_64 lsm_sim.arm64
