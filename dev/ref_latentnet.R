@@ -93,3 +93,35 @@ set.seed(23); n <- 40; z <- matrix(rnorm(n * 2, 0, 1), n, 2)
 eta <- 0.2 + z %*% t(z) * 0.5; A <- matrix(rbinom(n * n, 1, plogis(eta)), n, n); A[lower.tri(A, TRUE)] <- 0; A <- A + t(A)
 netd <- network(A, directed = FALSE)
 two_chains("bil40", "netd ~ bilinear(d = 2)", netd, 61)
+
+# ---- Milestone 3 fixtures (nwlsm 0.4.0): latent clusters (G), planted well-separated clusters ----
+# (a) undirected, n = 45, three planted clusters in d = 2; (b) directed, n = 36, two planted clusters with a node covariate.
+ctl4 <- ergmm.control(burnin = 20000, sample.size = 4000, interval = 20)
+save_cluster <- function(name, f, net, truth) {
+  el <- as.matrix(net, matrix.type = "edgelist"); write.csv(data.frame(from = el[, 1], to = el[, 2]), file.path(out, paste0(name, "_edges.csv")), row.names = FALSE)
+  write.csv(data.frame(truth = truth), file.path(out, paste0(name, "_truth.csv")), row.names = FALSE)
+  b <- f$sample$beta; write.csv(data.frame(mean = colMeans(b), sd = apply(b, 2, sd)), file.path(out, paste0(name, "_beta.csv")))
+  write.csv(data.frame(llk_mean = mean(f$sample$lpY), llk_sd = sd(f$sample$lpY)), file.path(out, paste0(name, "_llk.csv")), row.names = FALSE)
+  Z <- f$sample$Z; ns <- dim(Z)[1]; n <- dim(Z)[2]
+  D <- matrix(0, n, n); for (s in seq_len(ns)) D <- D + as.matrix(dist(Z[s, , ])); D <- D / ns
+  write.csv(D, file.path(out, paste0(name, "_meandist.csv")), row.names = FALSE)
+  zk <- f$mkl$Z.K; cl <- if (is.matrix(zk)) max.col(zk) else as.integer(zk)
+  write.csv(data.frame(class = cl), file.path(out, paste0(name, "_class.csv")), row.names = FALSE)
+}
+set.seed(71); n <- 45; truth <- rep(1:3, each = 15); ctr <- rbind(c(-4, 0), c(4, 0), c(0, 6.5))
+z <- ctr[truth, ] + matrix(rnorm(n * 2, 0, 0.7), n, 2)
+eta <- 1.5 - as.matrix(dist(z)); A <- matrix(rbinom(n * n, 1, plogis(eta)), n, n); A[lower.tri(A, TRUE)] <- 0; A <- A + t(A)
+neta <- network(A, directed = FALSE)
+set.seed(72); fa <- ergmm(neta ~ euclidean(d = 2, G = 3), control = ctl4); save_cluster("clu45", fa, neta, truth)
+set.seed(73); fa2 <- ergmm(neta ~ euclidean(d = 2, G = 3), control = ctl4)
+write.csv(data.frame(mean = colMeans(fa2$sample$beta), sd = apply(fa2$sample$beta, 2, sd)), file.path(out, "clu45_c2_beta.csv"))
+set.seed(74); n <- 36; truth <- rep(1:2, each = 18); ctr <- rbind(c(-3.5, 0), c(3.5, 0)); x <- rnorm(n)
+z <- ctr[truth, ] + matrix(rnorm(n * 2, 0, 0.7), n, 2)
+eta <- 1.2 + 0.4 * abs(outer(x, x, "-")) - as.matrix(dist(z)); A <- matrix(rbinom(n * n, 1, plogis(eta)), n, n); diag(A) <- 0
+netb2 <- network(A, directed = TRUE); set.vertex.attribute(netb2, "x", x)
+write.csv(data.frame(x = x), file.path(out, "clu36_x.csv"), row.names = FALSE)
+set.seed(75); fb <- ergmm(netb2 ~ euclidean(d = 2, G = 2) + absdiff("x"), control = ctl4); save_cluster("clu36", fb, netb2, truth)
+set.seed(76); fb2 <- ergmm(netb2 ~ euclidean(d = 2, G = 2) + absdiff("x"), control = ctl4)
+write.csv(data.frame(mean = colMeans(fb2$sample$beta), sd = apply(fb2$sample$beta, 2, sd)), file.path(out, "clu36_c2_beta.csv"))
+# priors of the cluster model (pins Z.var = 0.125 (n/G)^(2/d), df = sqrt(n/G), Z.mean.var = 2 * 0.125 n^(2/d), pK = sqrt(n/G))
+cat("clusters done\n")
