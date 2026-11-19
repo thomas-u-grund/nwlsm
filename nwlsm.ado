@@ -1,4 +1,4 @@
-*! version 0.1.0  19nov2026 nwlsm
+*! version 0.2.0  19nov2026 nwlsm
 * Copyright (C) 2026 Thomas U. Grund
 * This file is part of nwlsm, a Stata package for latent space models for networks. It follows the latent space model of
 * Hoff, Raftery and Handcock (2002) as implemented in the R package latentnet (Krivitsky and Handcock) and is written independently.
@@ -145,7 +145,7 @@ program nwlsm, eclass
 	matrix rownames `ACC' = acceptance stepsize
 	ereturn post `B' `V', obs(`__ny')
 	ereturn local cmd "nwlsm"
-	ereturn local version "0.1.0"
+	ereturn local version "0.2.0"
 	ereturn local title "Latent space model (Euclidean distance), posterior by MCMC"
 	ereturn local network "`netname'"
 	ereturn local directed = cond(`__dir', "directed", "undirected")
