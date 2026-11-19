@@ -1,9 +1,9 @@
 {smcl}
-{* *! version 0.5.0  19nov2026 author: Thomas Grund}{...}
+{* *! version 0.6.0  19nov2026 author: Thomas Grund}{...}
 {title:Title}
 
 {p2colset 9 17 24 2}{...}
-{p2col :nwlsm  {hline 2}}Latent space model for the ties of a binary or valued network, fitted by MCMC{p_end}
+{p2col :nwlsm  {hline 2}}Latent space model for the ties of a binary or valued network, and for social influence, fitted by MCMC{p_end}
 {p2colreset}{...}
 
 {title:Syntax}
@@ -15,7 +15,7 @@
 {cmd:nwlsm}  (replay after a fit)
 
 {p 8 16 2}
-{cmd:estat} {c -(}{cmd:positions}|{cmd:mcmcdiag}|{cmd:clusters}|{cmd:predict}|{cmd:gof}|{cmd:ppcheck}{c )-} [{cmd:,} {it:options}]
+{cmd:estat} {c -(}{cmd:positions}|{cmd:mcmcdiag}|{cmd:clusters}|{cmd:predict}|{cmd:gof}|{cmd:ppcheck}|{cmd:influence}{c )-} [{cmd:,} {it:options}]
 
 {p 8 16 2}
 {cmd:nwlsm version}
@@ -38,6 +38,11 @@
 {synopt :{opt sendervar(#)}, {opt senderdf(#)}}scale (default 1) and degrees of freedom (default 3) of the prior of the sender variance; likewise {opt receivervar()}, {opt receiverdf()}, {opt socialityvar()}, {opt socialitydf()}{p_end}
 {synopt :{opt bil:inear}}bilinear (inner-product) latent term instead of the distance{p_end}
 {synopt :{opt clus:ters(#)}}number of latent clusters, 2 to 6 (latentnet's {cmd:G}); default none{p_end}
+{synopt :{opt inf:luence(varlist)}}latent space model for social influence: the outcome, the lagged outcome and any other regressors (variables with one observation per actor){p_end}
+{synopt :{opt nei:ghbors(#)}}influence model: number of nearest actors in the latent space whose lagged outcomes act on an actor; default {cmd:0}, all other actors{p_end}
+{synopt :{opt wei:ght(name)}}influence model: {cmd:invdist} (weights proportional to 1/distance; default) or {cmd:expdist} (proportional to exp(-distance)){p_end}
+{synopt :{opt obv:ar(#)}}influence model: prior variance of the outcome coefficients; default {cmd:100}{p_end}
+{synopt :{opt osig:ma(a b)}}influence model: inverse-gamma prior of the error variance; default {cmd:0.01 0.01}{p_end}
 {synopt :{opt nsample(#)}}number of posterior draws kept (in all chains together); default {cmd:4000}{p_end}
 {synopt :{opt burnin(#)}}sweeps discarded after the tuning runs; default {cmd:10000}{p_end}
 {synopt :{opt interval(#)}}sweeps between two kept draws; default {cmd:10}{p_end}
@@ -66,6 +71,41 @@ replaced by the inner product z_i'z_j, which is added to the log odds. Actors th
 are more likely to be tied; ties are independent given the positions. For an undirected network every pair counts once. The posterior is sampled by Markov chain Monte
 Carlo in a compiled (C) plugin: a random-walk Metropolis-Hastings update of one position at a time, of one random effect at a time and of each coefficient in turn,
 and Gibbs updates of the variances of the positions and of the random effects.
+
+{title:Latent space model for social influence}
+
+{pstd}
+With {opt influence(}{it:outcome lag} [{it:covariates}]{opt )} {cmd:nwlsm} fits the latent space model for social influence of Sweet and Adhikari (2020): the latent space model of the ties above and, jointly with it,
+a linear model for an actor-level outcome in which social influence acts through the latent positions that are estimated from the network. The variables hold one observation per actor, in the order
+of the actors of {it:netname}: first the outcome y_t, measured after the network was formed, second the same outcome y_(t-1) measured before (the lagged outcome), then any other regressors. The outcome of actor {it:k} is
+
+{p 12 12 2}
+y_k = b_0 + b_1 y_(t-1),k + b_2 x_k2 + ... + b_influence m_k + e_k,   e_k ~ N(0, s2_y),   m_k = sum_j w_kj y_(t-1),j
+
+{pstd}
+where m_k is the weighted mean of the lagged outcomes of the other actors, and the weights depend on the distances between the latent positions: w_kj is proportional to f(|z_k - z_j|) over
+the {opt neighbors()} actors that are nearest to {it:k} in the latent space (all other actors by default) and sum to 1 for each {it:k}; f(d) = 1/d with {cmd:weight(invdist)} (the weights of the paper) or exp(-d) with {cmd:weight(expdist)}.
+Actors who are close in the latent space, in practice those with many ties to {it:k} or to the same others, are therefore most influential for {it:k}; ties to {it:k} are not needed to influence {it:k}.
+The coefficient b_influence is the effect of social influence (the "influence" row of the outcome equation). The lagged outcome is always a regressor.
+The weights change with the positions, so the outcome also informs the positions; the network and the outcome parameters are estimated in one MCMC run.
+
+{pstd}
+Sampler: the positions are updated one actor at a time by random-walk Metropolis-Hastings, whose acceptance ratio contains the change of the log likelihood of the ties and of all outcomes
+(the weights of the actor who moves and its weight in the others' means); coefficients of the outcome equation and error variance are drawn by Gibbs steps given the weights (the conditional distributions are a normal and an inverse gamma
+distribution). Priors: outcome coefficients N(0, {opt obvar()}), error variance inverse gamma with shape and rate {opt osigma()}. The network part (coefficients, effects, clusters, family, priors) is the model described above. The influence
+model needs the Euclidean distance; it cannot be combined with {opt bilinear}.
+
+{pstd}
+Differences from Sweet and Adhikari (2020). The intercept of the tie model is estimated (the paper fixes it at 2 to resolve a weak trade-off with the variance of the positions; the prior of the positions here is that of latentnet, whose scale grows with the number of actors).
+The variance of the positions has the latentnet prior instead of an inverse gamma. The outcome coefficients and the error variance are updated by Gibbs steps (the same posterior as random-walk steps). The default prior of the error variance is inverse gamma(0.01, 0.01), weaker than the paper's.
+Covariates of the ties are allowed, the paper uses none. One network and one outcome wave are modelled; the hierarchical version for several networks with random coefficients and the paper's indicator that makes actors without close neighbours immune to influence are not implemented.
+The positions reported ({cmd:e(Z)}) are the minimum Kullback-Leibler positions of the tie model, as for the other models. Influence needs variation in the lagged outcome among the actors who are weighted: with all other actors as neighbours the weighted means are nearly constant
+and the influence effect is weakly identified; a moderate {opt neighbors()} (as in the application of the paper, about the number of ties an actor can name) gives more information, and a {opt neighbors()} much larger than the true number of influential actors biases the effect.
+
+{pstd}
+Results: {cmd:e(b)} and {cmd:e(V)} hold the posterior means and covariance of the tie coefficients (equation {cmd:network}) and the outcome coefficients (equation {cmd:outcome}, the last is the influence effect); {cmd:e(summary)}, {cmd:e(rhat)} and
+{cmd:estat mcmcdiag} include them, the error variance is the row {cmd:sigma2_y} of {cmd:e(vsummary)}. {cmd:e(W)} is the posterior mean weight matrix (row {it:k}: the weights of the actors on {it:k}) and {cmd:e(pred)} holds, for each actor, the outcome, the posterior mean predicted outcome, the
+exposure m_k and the part of the prediction due to influence. {cmd:e(prob_positive)} is the posterior probability that the influence effect is positive.
 
 {title:Valued networks}
 
@@ -141,6 +181,9 @@ These matrices are stored when the number of actors fits into a Stata matrix.
 {synopt :{cmd:e(D)}, {cmd:e(P)}}posterior mean distances; posterior mean tie probabilities{p_end}
 {synopt :{cmd:e(sender)}, {cmd:e(receiver)}, {cmd:e(sociality)}}posterior mean and sd of each effect (one row per actor){p_end}
 {synopt :{cmd:e(mkl_b)}, {cmd:e(mkl_effects)}}coefficients and effects of the MKL fit{p_end}
+{synopt :{cmd:e(influence)}, {cmd:e(outcome)}, {cmd:e(lagvar)}, {cmd:e(ocovariates)}, {cmd:e(weight)}}influence model: "yes"; the outcome and lagged outcome variables; the names of the outcome coefficients; the weight function{p_end}
+{synopt :{cmd:e(neighbors)}, {cmd:e(obvar)}, {cmd:e(osigma_a)}, {cmd:e(osigma_b)}, {cmd:e(prob_positive)}, {cmd:e(ll_outcome)}}number of nearest actors, priors, posterior probability of a positive influence effect, posterior mean log likelihood of the outcomes{p_end}
+{synopt :{cmd:e(W)}, {cmd:e(pred)}}posterior mean weight matrix; outcome, predicted outcome, exposure and influence part by actor{p_end}
 {synopt :{cmd:e(effects)}, {cmd:e(latent)}}the random effects in the model; {cmd:euclidean} or {cmd:bilinear}{p_end}
 {synopt :{cmd:e(family)}, {cmd:e(trials)}, {cmd:e(dispvar)}, {cmd:e(dispdf)}}the family; the number of trials if one number was given; the prior of the dispersion (normal family){p_end}
 {p2colreset}{...}
@@ -207,8 +250,14 @@ Deviation from latentnet: its {cmd:simulate()} draws an undirected network by dr
 {cmd:estat ppcheck} [{cmd:, groups(}{it:#}{cmd:) graph name(}{it:name}{cmd:) nolist}] is a posterior predictive check of the tie probabilities: the dyads are sorted by their posterior mean predicted probability (expected value) and cut into {opt groups()} (default 10) groups of about equal size; the table compares the mean prediction with the observed mean
 in every group. Below it: for binary networks the Brier score, the area under the ROC curve and the mean log loss; for valued networks the root mean squared error, the correlation and the mean absolute error of the posterior mean expected values with the observed values. {opt graph} draws the calibration plot. Returned in {cmd:r(groups)}, {cmd:r(score)}, {cmd:r(auc_or_corr)} and {cmd:r(N)}.
 
+{phang}
+{cmd:estat influence} [{cmd:, top(}{it:#}{cmd:) predict(}{it:var}{cmd:) exposure(}{it:var}{cmd:) exerted(}{it:var}{cmd:) graph name(}{it:name}{cmd:) nolist}] (after {opt influence()}) shows the outcome equation, the posterior probability of a positive influence effect,
+the R-squared of the posterior mean predictions with and without the influence term, the mean effective number of influencing actors (the inverse of the sum of squared weights) and the {opt top()} actors who exert most influence (column sums of the posterior mean weights) with the exposure they receive.
+{opt predict()}, {opt exposure()} and {opt exerted()} store the posterior mean prediction, the exposure m_k and the influence exerted in new variables (one observation per actor); {opt graph} plots observed against predicted outcomes. Results in {cmd:r(influence)} (posterior mean), {cmd:r(influence_sd)},
+{cmd:r(influence_lower)}, {cmd:r(influence_upper)}, {cmd:r(prob_positive)}, {cmd:r(r2)}, {cmd:r(r2_noinfluence)}, {cmd:r(eff_neighbors)} and {cmd:r(exerted)}.
+
 {pstd}
-{help nwlsmplot} plots the positions with the ties as light lines, the actors coloured by a variable and sized by an effect or a variable.
+{help nwlsmplot} plots the positions with the ties as light lines, the actors coloured by a variable and sized by an effect, the influence exerted ({cmd:size(influence)}) or a variable.
 
 {title:Examples}
 
@@ -228,6 +277,9 @@ in every group. Below it: for binary networks the Brier score, the area under th
 {phang2}{cmd:. estat gof, nsim(200) plot}{p_end}
 {phang2}{cmd:. estat ppcheck, graph}{p_end}
 {phang2}{cmd:. estat mcmcdiag, graph}{p_end}
+{phang2}{cmd:. nwlsm advice, dim(2) influence(belief2 belief1 tenure) neighbors(10)}{p_end}
+{phang2}{cmd:. estat influence, top(5) predict(pbelief)}{p_end}
+{phang2}{cmd:. nwlsmplot, size(influence)}{p_end}
 {phang2}{cmd:. nwlsmplot, clusters}{p_end}
 {phang2}{cmd:. nwlsmplot, color(gender) size(sociality)}{p_end}
 
@@ -235,8 +287,9 @@ in every group. Below it: for binary networks the Brier score, the area under th
 
 {p 4 8 2}Hoff, P. D., Raftery, A. E. and Handcock, M. S. 2002. Latent space approaches to social network analysis. Journal of the American Statistical Association 97: 1090-1098.{p_end}
 {p 4 8 2}Handcock, M. S., Raftery, A. E. and Tantrum, J. M. 2007. Model-based clustering for social networks. Journal of the Royal Statistical Society A 170: 301-354.{p_end}
+{p 4 8 2}Sweet, T. M. and Adhikari, S. 2020. A latent space network model for social influence. Psychometrika 85: 251-274.{p_end}
 {p 4 8 2}Krivitsky, P. N. and Handcock, M. S. 2008. Fitting position latent cluster models for social networks with latentnet. Journal of Statistical Software 24(5).{p_end}
 {p 4 8 2}Krivitsky, P. N., Handcock, M. S., Raftery, A. E. and Hoff, P. D. 2009. Representing degree distributions, clustering, and homophily in social networks with latent cluster random effects models. Social Networks 31: 204-213.{p_end}
 
 {hline}
-{pstd}{it:nwlsm version 0.5.0, 19 November 2026}{p_end}{* nwversion}
+{pstd}{it:nwlsm version 0.6.0, 19 November 2026}{p_end}{* nwversion}

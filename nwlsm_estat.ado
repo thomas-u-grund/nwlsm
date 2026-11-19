@@ -1,4 +1,4 @@
-*! version 0.5.0  19nov2026 nwlsm_estat
+*! version 0.6.0  19nov2026 nwlsm_estat
 * Copyright (C) 2026 Thomas U. Grund. Part of nwlsm; GNU GPL-3 (see LICENSE).
 
 capture program drop nwlsm_estat
@@ -26,6 +26,10 @@ program nwlsm_estat, rclass
 	}
 	else if "`subcmd'" == "gof" {
 		_nwlsm_gof `rest'
+		return add
+	}
+	else if "`subcmd'" == "influence" {
+		_nwlsm_influence `rest'
 		return add
 	}
 	else if "`subcmd'" == "ppcheck" {
@@ -124,8 +128,13 @@ program _nwlsm_mcmcdiag, rclass
 	if `C' >= . local C 1
 	local G = e(clusters)
 	if `G' >= . local G 0
-	mata: __nwlsm_dg = LsmDiag((LsmSample("beta"), LsmSample("llk"), LsmSample("s2")), `C')
-	local nm : colnames e(b)
+	mata: __nwlsm_dg = LsmDiag((LsmSample("beta"), LsmSample("ob"), LsmSample("llk"), LsmSample("s2")), `C')
+	local nm `e(covariates)'
+	if "`e(influence)'" == "yes" {
+		foreach c in `e(ocovariates)' {
+			local nm `nm' y_`=cond("`c'" == "_cons", "cons", "`c'")'
+		}
+	}
 	if `G' > 0 {
 		local nm `nm' loglik
 		forvalues g = 1/`G' {
@@ -152,6 +161,10 @@ program _nwlsm_mcmcdiag, rclass
 	if "`e(family)'" == "normal" {
 		mata: __nwlsm_dg = __nwlsm_dg \ LsmDiag(LsmSample("disp"), `C')
 		local nm `nm' dispersion
+	}
+	if "`e(influence)'" == "yes" {
+		mata: __nwlsm_dg = __nwlsm_dg \ LsmDiag(LsmSample("os2"), `C')
+		local nm `nm' sigma2_y
 	}
 	mata: st_matrix("`R'", __nwlsm_dg)
 	capture mata: mata drop __nwlsm_dg
@@ -180,11 +193,11 @@ program _nwlsm_mcmcdiag, rclass
 		matrix `A' = e(tuning)
 		di as text "Acceptance rates: positions " as result %5.3f `A'[1, 1] _c
 		local k 1
-		foreach c in `: colnames e(b)' {
+		foreach c in `e(covariates)' {
 			local ++k
 			di as text ", `c' " as result %5.3f `A'[1, `k'] _c
 		}
-		local k = colsof(e(b)) + 1
+		local k = wordcount("`e(covariates)'") + 1
 		local j 0
 		foreach t in sender receiver sociality {
 			local ++j
@@ -444,7 +457,7 @@ program _nwlsm_gof, rclass
 	local d_distance "minimum geodesic distance"
 	local d_model "model statistics"
 	local d_values "tie values"
-	local cnames : colnames e(b)
+	local cnames `e(covariates)'
 	foreach t of local order {
 		local inw : list t in want
 		if !`inw' continue
@@ -628,4 +641,118 @@ program _nwlsm_ppcheck, rclass
 	return scalar N = `SM'[1, 1]
 	return scalar score = `SM'[1, 2]
 	return scalar auc_or_corr = `SM'[1, 3]
+end
+
+* estat influence: the outcome equation of the latent space influence model, predictions and the actors who exert most influence
+capture program drop _nwlsm_influence
+program _nwlsm_influence, rclass
+	version 14
+	syntax [, PREDict(string) EXPosure(string) EXErted(string) TOP(integer 10) NOList GRaph NAME(string)]
+	if "`e(influence)'" != "yes" {
+		di as error "the model was fitted without influence()"
+		exit 198
+	}
+	tempname T W PR EX
+	matrix `T' = e(summary)
+	local K : word count `e(covariates)'
+	local q : word count `e(ocovariates)'
+	local rb = `K' + `q'
+	local n = e(N_nodes)
+	capture matrix `PR' = e(pred)
+	if _rc {
+		di as error "the predictions were not stored (too many actors for a Stata matrix)"
+		exit 498
+	}
+	matrix `W' = e(W)
+	mata: __nwlsm_x = st_matrix("`PR'")
+	mata: st_numscalar("__nwlsm_sst", sum((__nwlsm_x[., 1] :- mean(__nwlsm_x[., 1])) :^ 2))
+	mata: st_numscalar("__nwlsm_sse", sum((__nwlsm_x[., 1] - __nwlsm_x[., 2]) :^ 2))
+	mata: st_numscalar("__nwlsm_sse0", sum((__nwlsm_x[., 1] - (__nwlsm_x[., 2] - __nwlsm_x[., 4])) :^ 2))
+	mata: st_matrix("`EX'", colsum(st_matrix("`W'"))')
+	mata: st_numscalar("__nwlsm_mx", max(st_matrix("`EX'")))
+	mata: st_numscalar("__nwlsm_ent", mean(1 :/ rowsum(st_matrix("`W'") :^ 2)))
+	local r2 = 1 - scalar(__nwlsm_sse) / scalar(__nwlsm_sst)
+	local r20 = 1 - scalar(__nwlsm_sse0) / scalar(__nwlsm_sst)
+	local effn = scalar(__nwlsm_ent)
+	scalar drop __nwlsm_sst __nwlsm_sse __nwlsm_sse0 __nwlsm_mx __nwlsm_ent
+	local labs : rownames `W'
+	if `"`predict'"' != "" | `"`exposure'"' != "" | `"`exerted'"' != "" {
+		if _N != `n' {
+			di as error "{p 0 0 2}predict(), exposure() and exerted() need a data set with one observation per actor in the order of the actors of {bf:`e(network)'}; the data set has `=_N' observations.{p_end}"
+			exit 198
+		}
+		if `"`predict'"' != "" {
+			confirm new variable `predict'
+			quietly generate double `predict' = `PR'[_n, 2]
+		}
+		if `"`exposure'"' != "" {
+			confirm new variable `exposure'
+			quietly generate double `exposure' = `PR'[_n, 3]
+		}
+		if `"`exerted'"' != "" {
+			confirm new variable `exerted'
+			quietly generate double `exerted' = `EX'[_n, 1]
+		}
+	}
+	if "`nolist'" == "" {
+		di
+		di as text "Latent space influence model: outcome " as result "`e(outcome)'" as text ", lagged outcome " as result "`e(lagvar)'" as text "; weights `e(weight)', " as result e(neighbors) as text " nearest actors"
+		di as text "{hline 78}"
+		di as text _col(25) %10s "Mean" %10s "Sd" %10s "MC s.e." %11s "Lower 95%" %10s "Upper 95%"
+		di as text "{hline 78}"
+		local k `K'
+		foreach c in `e(ocovariates)' {
+			local ++k
+			di as text %-24s abbrev("`c'", 23) _col(25) as result %10.4f `T'[`k', 1] %10.4f `T'[`k', 2] %10.4f `T'[`k', 3] %11.4f `T'[`k', 4] %10.4f `T'[`k', 5]
+		}
+		tempname VT
+		matrix `VT' = e(vsummary)
+		local nv = rowsof(`VT')
+		di as text %-24s "sigma2_y (error variance)" _col(25) as result %10.4f `VT'[`nv', 1] %10.4f `VT'[`nv', 2] %10.4f `VT'[`nv', 3] %11.4f `VT'[`nv', 4] %10.4f `VT'[`nv', 5]
+		di as text "{hline 78}"
+		di as text "Posterior probability that the influence effect is positive: " as result %6.4f e(prob_positive)
+		di as text "R-squared of the posterior mean predictions: " as result %6.4f `r2' as text "; without the influence term: " as result %6.4f `r20' as text "; the influence term adds " as result %6.4f `r2' - `r20'
+		di as text "Effective number of influencing actors per actor (inverse of the sum of squared posterior mean weights, mean): " as result %6.2f `effn'
+		if `top' > 0 {
+			mata: st_matrix("__nwlsm_ord", order(-st_matrix("`EX'"), 1))
+			local m = min(`top', `n')
+			di
+			di as text "Actors who exert most influence (column sums of the posterior mean weights e(W))"
+			di as text "{hline 62}"
+			di as text %-22s "Actor" %20s "Influence exerted" %20s "Exposure received"
+			di as text "{hline 62}"
+			forvalues r = 1/`m' {
+				local j = __nwlsm_ord[`r', 1]
+				local lb : word `j' of `labs'
+				if "`lb'" == "" local lb "`j'"
+				di as text %-22s abbrev("`lb'", 21) as result %20.3f `EX'[`j', 1] %20.3f `PR'[`j', 3]
+			}
+			di as text "{hline 62}"
+			capture matrix drop __nwlsm_ord
+		}
+	}
+	if "`graph'" != "" {
+		if "`name'" == "" local name "influence"
+		preserve
+		quietly {
+			clear
+			svmat double `PR', names(c)
+			rename c1 obs
+			rename c2 pred
+		}
+		twoway (scatter obs pred, mcolor(navy%70)) (function y = x, range(pred) lcolor(gs8) lpattern(dash)), ///
+			xtitle("predicted outcome (posterior mean)") ytitle("observed outcome") title("Latent space influence model: fit") legend(off) ///
+			name(`name', replace)
+		restore
+	}
+	return scalar influence = `T'[`rb', 1]
+	return scalar influence_sd = `T'[`rb', 2]
+	return scalar influence_lower = `T'[`rb', 4]
+	return scalar influence_upper = `T'[`rb', 5]
+	return scalar prob_positive = e(prob_positive)
+	return scalar r2 = `r2'
+	return scalar r2_noinfluence = `r20'
+	return scalar eff_neighbors = `effn'
+	capture mata: mata drop __nwlsm_x
+	return matrix exerted = `EX'
 end

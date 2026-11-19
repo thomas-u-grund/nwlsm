@@ -19,7 +19,7 @@ BEGIN
   TEXT tx_col 20 64 220 ., label("Colour by variable:")
   VARNAME vn_col 250 64 160 ., nomem
   CHECKBOX cx_clu 420 64 120 ., label("by cluster")
-  TEXT tx_size 20 90 220 ., label("Size by (sender, receiver, sociality or variable):")
+  TEXT tx_size 20 90 220 ., label("Size by (sender, receiver, sociality, influence or variable):")
   EDIT ed_size 250 90 160 ., nomem
   TEXT tx_msize 20 116 220 ., label("Marker size (without size by):")
   EDIT ed_msize 250 116 160 ., nomem

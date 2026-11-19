@@ -38,3 +38,13 @@ The chain's labels switch freely in a cluster model. `lsm_relabel()` permutes th
 - latentnet 2.12.0 `simulate()` for UNDIRECTED networks draws every ordered pair and keeps a tie if either draw is a tie (about 1.5 times the edges), so its undirected `gof()` is biased; `estat gof` draws once per pair. The undirected reference in `dev/ref_latentnet.R` (`gof_fixture_u`) is built from latentnet's draws with one draw per dyad. latentnet `gof(model)` fails for latent formulas.
 - Mata: `rpoisson(r,c,m)` with a matrix `m` returns rows(m)*r rows, use `rpoisson(1,1,m)`; `import`/`preserve` clear `r()`, stash `r()` matrices first; a ternary with a 1x1 matrix condition gave r(3204), use `if`; a `'` just before `}` on one line breaks do-file parsing; Stata matrix row names cannot contain spaces.
 - `estat gof` is deterministic given `seed()` and does not depend on `threads()` (per-draw generator seed + 7919 (k+1)).
+
+## Influence model (0.6.0)
+- Identification: with all other actors as neighbours the weighted means m_k of the lagged outcomes are nearly constant (they average over everybody), so the influence effect is collinear with the intercept and its posterior is wide; a moderate `neighbors()` identifies it better. A `neighbors()` much larger than the true number of influential actors biases the effect (paper, section 6.3).
+- The tie-model intercept and the position variance are estimated (latentnet prior), the paper fixes the intercept at 2. Distances, and so the weights, are in the units of the tie model with distance coefficient 1.
+- `e(b)` has two equations (`network`, `outcome`, both with a `_cons`); the code that reads the tie coefficients uses `e(covariates)` (network names only), not `colnames e(b)`. `e(tuning)` has the network coefficients only.
+- `e(Z)` is the minimum Kullback-Leibler fit of the tie model only; the outcome informs the draws (and so `e(D)`, `e(Zmean)`, `e(W)`) but not the MKL optimisation.
+- The sets of nearest actors are defined by `d_kj <= G-th smallest distance` of row k; the shortcut updates in `infl_dll()` are valid only for the cases listed there (the mover is in the set and not the boundary and stays inside; or is outside and stays outside); anything else recomputes row k. The sums are rebuilt at the start of every sweep.
+- `state_alloc()` is called on a zeroed `State` everywhere (`memset`), including in `stata_call()`; the influence arrays are only allocated with the influence model and freed by `state_free()`.
+- Dialog `.dlg` `if` conditions must not use parentheses; the macOS dialog assembly harness is used to check the generated commands.
+- `LsmCheckInfl()` (Mata) and plugin codes 5 and 6 exist only for the tests.

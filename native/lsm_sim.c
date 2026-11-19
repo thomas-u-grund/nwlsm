@@ -59,8 +59,8 @@
 #include <unistd.h>
 #endif
 
-#define LSM_PROTOCOL 4
-#define HDR 16
+#define LSM_PROTOCOL 5
+#define HDR 20
 
 /* Threads (pthreads; _beginthreadex on Windows). Only the independent work items (chains, Kullback-Leibler blocks, MKL starts) use them. */
 #if SYSTEM == STWIN32
@@ -95,9 +95,14 @@ typedef struct {
 	double es[3], edf[3], ev0[3];
 	double *pvar, *beta, *Z, *x, *e0; /* x: nc blocks of n*n; e0: 3 blocks of n */
 	signed char *y;
+	/* latent space influence model (outcome part): on, G nearest neighbours (0: all), weight (0 inverse distance, 1 exp(-distance)), number p of
+	   regressors, prior variance of the coefficients, inverse-gamma prior of the error variance, starts; outcome, lagged outcome, p columns of regressors */
+	int io_on, io_G, io_wt, io_p;
+	double io_bvar, io_sa, io_sb, io_s20;
+	double *io_ob0, *io_y, *io_yl, *io_x;
 } Model;
 
-static void model_free(Model *g) { free(g->yv); free(g->tr); free(g->lcst); free(g->pvar); free(g->beta); free(g->Z); free(g->x); free(g->e0); free(g->y); }
+static void model_free(Model *g) { free(g->yv); free(g->tr); free(g->lcst); free(g->pvar); free(g->beta); free(g->Z); free(g->x); free(g->e0); free(g->y); free(g->io_ob0); free(g->io_y); free(g->io_yl); free(g->io_x); }
 
 /* ---- random numbers: xoshiro256**, seeded by splitmix64 ---- */
 typedef struct { uint64_t s[4]; int have; double spare; } Rng;
@@ -195,6 +200,11 @@ typedef struct {
 	const Model *g;
 	double *beta, *Z, *eff[3], *lin, *D, *L, *tmpD, *tmpL, *tmpL2;
 	double disp; /* dispersion of the normal family */
+	/* influence model: coefficients (p regressors, then the influence effect), error variance, weighted sums of each actor's neighbours' lagged outcomes
+	   (num / den = the weighted mean), distance to the G-th nearest neighbour, residuals, linear predictors without influence, membership of the neighbour sets;
+	   t*: proposal values */
+	double *ob, osig2, *inum, *iden, *ikth, *ires, *ixb, *tnum, *tden, *tres, *sbuf, *dtmp;
+	unsigned char *iset, *tflag;
 	int thr; /* threads for the per-dyad passes of this chain (beta updates) */
 } State;
 
@@ -205,9 +215,19 @@ static int state_alloc(State *s, const Model *g) {
 	for (t = 0; t < 3; t++) { s->eff[t] = calloc(g->n, sizeof(double)); if (!s->eff[t]) return 0; }
 	s->lin = malloc(sizeof(double) * nn); s->D = malloc(sizeof(double) * nn); s->L = malloc(sizeof(double) * nn);
 	s->tmpD = malloc(sizeof(double) * g->n); s->tmpL = malloc(sizeof(double) * g->n); s->tmpL2 = malloc(sizeof(double) * g->n);
-	return s->beta && s->Z && s->lin && s->D && s->L && s->tmpD && s->tmpL && s->tmpL2;
+	if (!(s->beta && s->Z && s->lin && s->D && s->L && s->tmpD && s->tmpL && s->tmpL2)) return 0;
+	if (g->io_on) {
+		int n = g->n;
+		s->ob = calloc(g->io_p + 1, sizeof(double));
+		s->inum = calloc(n, sizeof(double)); s->iden = calloc(n, sizeof(double)); s->ikth = calloc(n, sizeof(double)); s->ires = calloc(n, sizeof(double));
+		s->ixb = calloc(n, sizeof(double)); s->tnum = calloc(n, sizeof(double)); s->tden = calloc(n, sizeof(double)); s->tres = calloc(n, sizeof(double));
+		s->sbuf = calloc(n, sizeof(double)); s->dtmp = calloc(n, sizeof(double)); s->iset = calloc(nn, 1); s->tflag = calloc(n, 1);
+		if (!(s->ob && s->inum && s->iden && s->ikth && s->ires && s->ixb && s->tnum && s->tden && s->tres && s->sbuf && s->dtmp && s->iset && s->tflag)) return 0;
+	}
+	return 1;
 }
-static void state_free(State *s) { int t; free(s->beta); free(s->Z); for (t = 0; t < 3; t++) free(s->eff[t]); free(s->lin); free(s->D); free(s->L); free(s->tmpD); free(s->tmpL); free(s->tmpL2); }
+static void state_free(State *s) { int t; free(s->beta); free(s->Z); for (t = 0; t < 3; t++) free(s->eff[t]); free(s->lin); free(s->D); free(s->L); free(s->tmpD); free(s->tmpL); free(s->tmpL2);
+	free(s->ob); free(s->inum); free(s->iden); free(s->ikth); free(s->ires); free(s->ixb); free(s->tnum); free(s->tden); free(s->tres); free(s->sbuf); free(s->dtmp); free(s->iset); free(s->tflag); }
 
 /* the part of the linear predictor without the latent term */
 static inline double linpred(const Model *g, const double *beta, const double *const *eff, int i, int j) {
@@ -307,6 +327,124 @@ static void eff_commit(State *s, int t, int i, double delta) {
 		}
 	}
 	s->eff[t][i] += delta;
+}
+
+/* ---- latent space model for social influence (Sweet and Adhikari 2020): outcome part ----
+   y_k = sum_c x_kc ob_c + ob_p m_k + e_k,  e_k ~ N(0, osig2),  m_k = sum_{j in N_k} w_kj ylag_j,  w_kj = f(d_kj) / sum_{j in N_k} f(d_kj),
+   N_k the G nearest actors of k in the latent space (all other actors when G = 0 or G >= n - 1), f(d) = 1/d (weight 0) or exp(-d) (weight 1).
+   A move of actor i changes row i of the weights and the entry i of the other rows; the rows whose neighbour set changes are recomputed (O(n) each). */
+#define IO_TINY 1e-300
+static inline double wf(int wt, double d) { return wt == 0 ? 1.0 / (d > 1e-12 ? d : 1e-12) : exp(-d); }
+/* k-th smallest (0-based) of a[0..m-1]; a is permuted */
+static double qselect(double *a, int m, int k) {
+	int lo = 0, hi = m - 1;
+	while (lo < hi) {
+		double pv = a[(lo + hi) / 2]; int i = lo, j = hi;
+		while (i <= j) {
+			while (a[i] < pv) i++;
+			while (a[j] > pv) j--;
+			if (i <= j) { double t = a[i]; a[i] = a[j]; a[j] = t; i++; j--; }
+		}
+		if (k <= j) hi = j; else if (k >= i) lo = i; else return a[k];
+	}
+	return a[k];
+}
+static inline int infl_all(const Model *g) { return g->io_G <= 0 || g->io_G >= g->n - 1; }
+/* weighted sums of row k from the distances dist[0..n-1]; neighbour set N_k = {j != k: dist[j] <= th}, th the G-th smallest distance */
+static void infl_row(State *s, int k, const double *dist, double *num, double *den, double *kth, unsigned char *setrow) {
+	const Model *g = s->g; int n = g->n, j, m = 0; double th = HUGE_VAL, a = 0.0, b = 0.0;
+	if (!infl_all(g)) {
+		for (j = 0; j < n; j++) if (j != k) s->sbuf[m++] = dist[j];
+		th = qselect(s->sbuf, m, g->io_G - 1);
+	}
+	for (j = 0; j < n; j++) {
+		int in;
+		if (j == k) { if (setrow) setrow[j] = 0; continue; }
+		in = dist[j] <= th;
+		if (setrow) setrow[j] = (unsigned char)in;
+		if (in) { double f = wf(g->io_wt, dist[j]); a += f * g->io_yl[j]; b += f; }
+	}
+	*num = a; *den = b; *kth = th;
+}
+static inline double infl_m(double num, double den) { return num / (den > IO_TINY ? den : IO_TINY); }
+static void infl_setxb(State *s) {
+	const Model *g = s->g; int n = g->n, p = g->io_p, k, c;
+	for (k = 0; k < n; k++) { double v = 0.0; for (c = 0; c < p; c++) v += g->io_x[(size_t)c * n + k] * s->ob[c]; s->ixb[k] = v; }
+}
+static void infl_resid(State *s) {
+	const Model *g = s->g; int n = g->n, k;
+	for (k = 0; k < n; k++) s->ires[k] = g->io_y[k] - s->ixb[k] - s->ob[g->io_p] * infl_m(s->inum[k], s->iden[k]);
+}
+static void infl_rebuild(State *s) {
+	const Model *g = s->g; int n = g->n, k;
+	for (k = 0; k < n; k++) infl_row(s, k, s->D + (size_t)k * n, &s->inum[k], &s->iden[k], &s->ikth[k], s->iset + (size_t)k * n);
+	infl_resid(s);
+}
+static double infl_ssq(const State *s) { int k; double t = 0.0; for (k = 0; k < s->g->n; k++) t += s->ires[k] * s->ires[k]; return t; }
+static double infl_ll(const State *s) { int n = s->g->n; return -0.5 * n * log(6.283185307179586 * s->osig2) - infl_ssq(s) / (2.0 * s->osig2); }
+/* change of the outcome log likelihood if actor i moves (the new distances of i are in tmpD, set by actor_dll); fills tnum, tden, tres, tflag for the commit */
+static double infl_dll(State *s, int i) {
+	const Model *g = s->g; int n = g->n, p = g->io_p, wt = g->io_wt, k, all = infl_all(g);
+	double dll = 0.0, b2 = s->ob[p], inv = 1.0 / (2.0 * s->osig2), nu, de, th;
+	for (k = 0; k < n; k++) { s->tflag[k] = 0; s->tnum[k] = s->inum[k]; s->tden[k] = s->iden[k]; s->tres[k] = s->ires[k]; }
+	infl_row(s, i, s->tmpD, &nu, &de, &th, NULL);
+	s->tflag[i] = 2; s->tnum[i] = nu; s->tden[i] = de;
+	s->tres[i] = g->io_y[i] - s->ixb[i] - b2 * infl_m(nu, de);
+	dll += (s->ires[i] * s->ires[i] - s->tres[i] * s->tres[i]) * inv;
+	for (k = 0; k < n; k++) {
+		double dold, dnew, kth; int fl;
+		if (k == i) continue;
+		dold = s->D[(size_t)k * n + i]; dnew = s->tmpD[k]; kth = s->ikth[k];
+		if (all) fl = 1;
+		else if (s->iset[(size_t)k * n + i]) fl = (dold < kth && dnew <= kth) ? 1 : 2;
+		else fl = (dnew > kth) ? 0 : 2;
+		if (fl == 0) continue;
+		if (fl == 1) { double df = wf(wt, dnew) - wf(wt, dold); s->tnum[k] = s->inum[k] + df * g->io_yl[i]; s->tden[k] = s->iden[k] + df; }
+		else {
+			memcpy(s->dtmp, s->D + (size_t)k * n, sizeof(double) * n); s->dtmp[i] = dnew;
+			infl_row(s, k, s->dtmp, &nu, &de, &th, NULL); s->tnum[k] = nu; s->tden[k] = de;
+		}
+		s->tflag[k] = (unsigned char)fl;
+		s->tres[k] = g->io_y[k] - s->ixb[k] - b2 * infl_m(s->tnum[k], s->tden[k]);
+		dll += (s->ires[k] * s->ires[k] - s->tres[k] * s->tres[k]) * inv;
+	}
+	return dll;
+}
+/* after actor_commit (D holds the new distances) */
+static void infl_commit(State *s, int i) {
+	const Model *g = s->g; int n = g->n, k;
+	for (k = 0; k < n; k++) {
+		if (k == i || s->tflag[k] == 2) infl_row(s, k, s->D + (size_t)k * n, &s->inum[k], &s->iden[k], &s->ikth[k], s->iset + (size_t)k * n);
+		else if (s->tflag[k] == 1) { s->inum[k] = s->tnum[k]; s->iden[k] = s->tden[k]; }
+		s->ires[k] = s->tres[k];
+	}
+}
+/* Gibbs steps: coefficients (normal prior N(0, bvar), conjugate) and error variance (inverse gamma) */
+static void infl_gibbs(State *s, Rng *r) {
+	const Model *g = s->g; int n = g->n, p = g->io_p, q = p + 1, a, b, k, c;
+	double A[40 * 40], L[40 * 40], rhs[40], u[40], zz[40], mu[40], col[40], ss, prec = 1.0 / g->io_bvar, is2 = 1.0 / s->osig2;
+	for (a = 0; a < q; a++) { rhs[a] = 0.0; for (b = 0; b < q; b++) A[a * q + b] = 0.0; }
+	for (k = 0; k < n; k++) {
+		for (c = 0; c < p; c++) col[c] = g->io_x[(size_t)c * n + k];
+		col[p] = infl_m(s->inum[k], s->iden[k]);
+		for (a = 0; a < q; a++) { rhs[a] += col[a] * g->io_y[k]; for (b = 0; b <= a; b++) A[a * q + b] += col[a] * col[b]; }
+	}
+	for (a = 0; a < q; a++) { for (b = 0; b < a; b++) A[b * q + a] = A[a * q + b]; }
+	for (a = 0; a < q; a++) for (b = 0; b < q; b++) A[a * q + b] = A[a * q + b] * is2 + (a == b ? prec : 0.0);
+	/* Cholesky A = L L' */
+	for (a = 0; a < q; a++) for (b = 0; b <= a; b++) {
+		double v = A[a * q + b]; int m;
+		for (m = 0; m < b; m++) v -= L[a * q + m] * L[b * q + m];
+		if (a == b) L[a * q + a] = sqrt(v > 1e-300 ? v : 1e-300); else L[a * q + b] = v / L[b * q + b];
+	}
+	for (a = 0; a < q; a++) { double v = rhs[a] * is2; int m; for (m = 0; m < a; m++) v -= L[a * q + m] * u[m]; u[a] = v / L[a * q + a]; }
+	for (a = 0; a < q; a++) zz[a] = rnorm(r);
+	for (a = 0; a < q; a++) u[a] += zz[a]; /* (L^-1 rhs/s2 + z); then solve L' x = u: x = mean + L'^-1 z */
+	for (a = q - 1; a >= 0; a--) { double v = u[a]; int m; for (m = a + 1; m < q; m++) v -= L[m * q + a] * mu[m]; mu[a] = v / L[a * q + a]; }
+	for (a = 0; a < q; a++) s->ob[a] = mu[a];
+	infl_setxb(s); infl_resid(s);
+	ss = infl_ssq(s);
+	s->osig2 = (g->io_sb + 0.5 * ss) / rgamma(r, g->io_sa + 0.5 * n);
 }
 
 /* The passes over all dyads (beta updates) are cut into NBLK blocks of rows; the partial sums are added in block order, so the result does not
@@ -486,8 +624,10 @@ static int model_read(Model *g, long L) {
 	n = (int)h[1]; g->n = n; g->dir = (int)h[2]; g->nc = (int)h[3]; g->d = (int)h[4]; g->K = g->nc + 1;
 	g->flags = (int)h[5]; g->lt = (int)h[6]; g->G = (int)h[7]; g->cscale = h[8]; g->cdf = h[9]; g->cmv = h[10]; g->calpha = h[11];
 	g->fam = (int)h[12]; g->dscale = h[13]; g->ddf = h[14]; g->disp0 = h[15]; g->dispm = h[15];
+	g->io_on = (int)h[16]; g->io_G = (int)h[17]; g->io_wt = (int)h[18]; g->io_p = (int)h[19];
 	for (t = 0; t < 3; t++) g->act[t] = (g->flags >> t) & 1;
 	if (n < 3 || g->d < 1 || g->nc < 0 || (g->lt != 0 && g->lt != 1) || g->G < 0 || g->G > 12 || (g->G > 0 && (g->cscale <= 0 || g->cdf <= 0 || g->cmv <= 0 || g->calpha <= 0))) return 198;
+	if (g->io_on && (g->io_p < 1 || g->io_p > 39 || g->io_G < 0 || (g->io_wt != 0 && g->io_wt != 1) || g->lt != 0)) return 198;
 	if (g->fam < 0 || g->fam > 3 || (g->fam == 3 && (g->dscale <= 0 || g->ddf <= 0 || g->disp0 <= 0))) return 198;
 	pos = HDR;
 	g->pvar = malloc(sizeof(double) * g->K); g->beta = malloc(sizeof(double) * g->K); g->Z = malloc(sizeof(double) * n * g->d);
@@ -512,6 +652,18 @@ static int model_read(Model *g, long L) {
 		if (g->fam == 2) for (m = 0; m < (long)n * n; m++) { SF_vdata(1, (ST_int)(++pos), &v); g->tr[m] = v; }
 	}
 	for (m = 0; m < (long)n * n * g->nc; m++) { SF_vdata(1, (ST_int)(++pos), &v); g->x[m] = v; }
+	if (g->io_on) {
+		int p = g->io_p;
+		g->io_ob0 = calloc(p + 1, sizeof(double)); g->io_y = calloc(n, sizeof(double)); g->io_yl = calloc(n, sizeof(double)); g->io_x = calloc((size_t)n * p, sizeof(double));
+		if (!g->io_ob0 || !g->io_y || !g->io_yl || !g->io_x) return 909;
+		SF_vdata(1, (ST_int)(++pos), &v); g->io_bvar = v; SF_vdata(1, (ST_int)(++pos), &v); g->io_sa = v;
+		SF_vdata(1, (ST_int)(++pos), &v); g->io_sb = v; SF_vdata(1, (ST_int)(++pos), &v); g->io_s20 = v;
+		for (k = 0; k <= p; k++) { SF_vdata(1, (ST_int)(++pos), &v); g->io_ob0[k] = v; }
+		for (m = 0; m < n; m++) { SF_vdata(1, (ST_int)(++pos), &v); g->io_y[m] = v; }
+		for (m = 0; m < n; m++) { SF_vdata(1, (ST_int)(++pos), &v); g->io_yl[m] = v; }
+		for (m = 0; m < (long)n * p; m++) { SF_vdata(1, (ST_int)(++pos), &v); g->io_x[m] = v; }
+		if (g->io_bvar <= 0 || g->io_sa <= 0 || g->io_sb <= 0 || g->io_s20 <= 0) return 198;
+	}
 	}
 	if (pos > L) return 198;
 	if (!g->dir) {
@@ -616,6 +768,7 @@ typedef struct { int S, burn, intv, pil, plen, ithr, mthr; double dz, db, de, tg
 typedef struct {
 	double *dDisp, *dBeta, *dLlk, *dS2, *dEv, *dZ, *dE, *dMu, *dLam, *dK; /* slices of the pooled draw arrays (draw-major) */
 	double *Dsum, *EYsum;                                          /* own, n x n */
+	double *dOb, *dOs2, *dOl, *Wsum, *musum, *msum, *csum;           /* influence model: draws (slices), weight matrix and prediction sums (own) */
 	uint64_t seed0;
 	double accZ, accB[64], accE[3], stepZ, stepB[64], stepE[3];
 	int rc;
@@ -643,6 +796,13 @@ static void chain_run(void *ctx, int idx) {
 		for (k = 0; k < (int)nd; k++) s.Z[k] += sd * rnorm(&rg);
 	}
 	state_rebuild(&s);
+	if (g.io_on) {
+		o->Wsum = calloc((size_t)n * n, sizeof(double)); o->musum = calloc(n, sizeof(double)); o->msum = calloc(n, sizeof(double)); o->csum = calloc(n, sizeof(double));
+		if (!o->Wsum || !o->musum || !o->msum || !o->csum) { o->rc = 909; goto done; }
+		memcpy(s.ob, g.io_ob0, sizeof(double) * (g.io_p + 1)); s.osig2 = g.io_s20;
+		infl_setxb(&s); infl_rebuild(&s);
+		for (k = 0; k < 3; k++) infl_gibbs(&s, &rg);
+	}
 	if (G > 0) clu_init(gp, s.Z, &cl);
 	for (k = 0; k < K; k++) db[k] = cf->db;
 	for (t = 0; t < 3; t++) { de[t] = cf->de; ev[t] = g.ev0[t]; }
@@ -650,15 +810,18 @@ static void chain_run(void *ctx, int idx) {
 		nsw = ph == 0 ? (long)cf->pil * plen : (ph == 1 ? cf->burn : (long)S * intv);
 		accZn = accZt = 0; for (k = 0; k < K; k++) accBn[k] = 0; for (t = 0; t < 3; t++) accEn[t] = accEt[t] = 0;
 		for (sw = 0; sw < nsw; sw++) {
+			if (g.io_on) infl_rebuild(&s);
 			for (i = 0; i < n; i++) {
 				double dll, dpr, lu; const double *mu = G > 0 ? cl.mu + cl.K[i] * d : NULL; double v = G > 0 ? cl.s2[cl.K[i]] : s2;
 				for (k = 0; k < d; k++) zn[k] = s.Z[i * d + k] + dz * rnorm(&rg);
 				dll = actor_dll(&s, i, zn);
+				if (g.io_on) dll += infl_dll(&s, i);
 				if (mu) { double a1 = 0, a0 = 0; for (k = 0; k < d; k++) { double t1 = zn[k] - mu[k], t0 = s.Z[i * d + k] - mu[k]; a1 += t1 * t1; a0 += t0 * t0; } dpr = -(a1 - a0) / (2.0 * v); }
 				else dpr = -(sumsq(zn, d) - sumsq(s.Z + i * d, d)) / (2.0 * v);
 				lu = log(runif(&rg)); accZt++;
-				if (lu < dll + dpr) { actor_commit(&s, i, zn); accZn++; }
+				if (lu < dll + dpr) { actor_commit(&s, i, zn); if (g.io_on) infl_commit(&s, i); accZn++; }
 			}
+			if (g.io_on) infl_gibbs(&s, &rg);
 			for (t = 0; t < 3; t++) {
 				if (!g.act[t]) continue;
 				for (i = 0; i < n; i++) {
@@ -699,6 +862,16 @@ static void chain_run(void *ctx, int idx) {
 				} else o->dS2[dr] = s2;
 				for (t = 0; t < 3; t++) o->dEv[dr * 3 + t] = g.act[t] ? ev[t] : 0.0;
 				memcpy(o->dZ + dr * nd, s.Z, sizeof(double) * nd);
+				if (g.io_on) {
+					int q = g.io_p + 1; double b2 = s.ob[g.io_p];
+					for (k = 0; k < q; k++) o->dOb[dr * q + k] = s.ob[k];
+					o->dOs2[dr] = s.osig2; o->dOl[dr] = infl_ll(&s);
+					for (i = 0; i < n; i++) {
+						double mi = infl_m(s.inum[i], s.iden[i]), dn = s.iden[i] > IO_TINY ? s.iden[i] : IO_TINY;
+						o->musum[i] += g.io_y[i] - s.ires[i]; o->msum[i] += mi; o->csum[i] += b2 * mi;
+						for (j = 0; j < n; j++) if (s.iset[(size_t)i * n + j]) o->Wsum[(size_t)i * n + j] += wf(g.io_wt, s.D[(size_t)i * n + j]) / dn;
+					}
+				}
 				for (t = 0; t < 3; t++) memcpy(o->dE + (dr * 3 + t) * n, s.eff[t], sizeof(double) * n);
 				for (i = 0; i < n; i++) for (j = 0; j < n; j++) {
 					o->Dsum[i * n + j] += s.D[i * n + j];
@@ -749,6 +922,7 @@ static int run_chains(const Model *gp, long L) {
 	long nd = (long)n * d, S, dr, m, pos = 0;
 	double a[13], *pDisp = NULL, *pBeta = NULL, *pLlk = NULL, *pS2 = NULL, *pEv = NULL, *pZ = NULL, *pE = NULL, *pMu = NULL, *pLam = NULL, *pK = NULL;
 	double *EY = NULL, *Dm = NULL, *kls = NULL, *xs = NULL, *fo = NULL; int *its = NULL; long *sel = NULL;
+	double *pOb = NULL, *pOs2 = NULL, *pOl = NULL, *Wm = NULL, *mum = NULL, *mm = NULL, *cm = NULL; int qo = g.io_on ? g.io_p + 1 : 0;
 	COut *outs = NULL; CJob *jobs = NULL; Cfg cf; char *tok;
 	(void)L;
 	for (q = 0; q < 13; q++) { tok = strtok(NULL, " \t"); a[q] = tok ? atof(tok) : -1.0; }
@@ -770,10 +944,16 @@ static int run_chains(const Model *gp, long L) {
 	pZ = malloc(sizeof(double) * S * nd); pE = malloc(sizeof(double) * S * 3 * n);
 	pMu = malloc(sizeof(double) * S * ng * d); pLam = malloc(sizeof(double) * S * ng); pK = malloc(sizeof(double) * S * n);
 	EY = calloc((size_t)n * n, sizeof(double)); Dm = calloc((size_t)n * n, sizeof(double));
+	if (g.io_on) {
+		pOb = malloc(sizeof(double) * S * qo); pOs2 = malloc(sizeof(double) * S); pOl = malloc(sizeof(double) * S);
+		Wm = calloc((size_t)n * n, sizeof(double)); mum = calloc(n, sizeof(double)); mm = calloc(n, sizeof(double)); cm = calloc(n, sizeof(double));
+		if (!pOb || !pOs2 || !pOl || !Wm || !mum || !mm || !cm) { SF_error("lsm_sim: not enough memory\n"); rc = 909; goto cleanup; }
+	}
 	if (!outs || !jobs || !pDisp || !pBeta || !pLlk || !pS2 || !pEv || !pZ || !pE || !pMu || !pLam || !pK || !EY || !Dm) { SF_error("lsm_sim: not enough memory\n"); rc = 909; goto cleanup; }
 	for (k = 0; k < C; k++) {
 		long o = (long)k * Sc;
 		outs[k].dDisp = pDisp + o; outs[k].dBeta = pBeta + o * K; outs[k].dLlk = pLlk + o; outs[k].dS2 = pS2 + o * ng; outs[k].dEv = pEv + o * 3; outs[k].dZ = pZ + o * nd;
+		if (g.io_on) { outs[k].dOb = pOb + o * qo; outs[k].dOs2 = pOs2 + o; outs[k].dOl = pOl + o; }
 		outs[k].dE = pE + o * 3 * n; outs[k].dMu = pMu + o * ng * d; outs[k].dLam = pLam + o * ng; outs[k].dK = pK + o * n;
 		jobs[k].g = gp; jobs[k].cfg = &cf; jobs[k].seed = (uint64_t)a[0] + 1000003ULL * (uint64_t)k; jobs[k].o = &outs[k];
 		outs[k].seed0 = (uint64_t)a[0];
@@ -781,6 +961,10 @@ static int run_chains(const Model *gp, long L) {
 	par_run(T, C, chain_run, jobs);
 	for (k = 0; k < C; k++) if (outs[k].rc) { SF_error("lsm_sim: a chain failed (not enough memory?)\n"); rc = outs[k].rc; goto cleanup; }
 	for (k = 0; k < C; k++) for (m = 0; m < (long)n * n; m++) { Dm[m] += outs[k].Dsum[m] / (double)S; EY[m] += outs[k].EYsum[m] / (double)S; }
+	if (g.io_on) for (k = 0; k < C; k++) {
+		for (m = 0; m < (long)n * n; m++) Wm[m] += outs[k].Wsum[m] / (double)S;
+		for (m = 0; m < n; m++) { mum[m] += outs[k].musum[m] / (double)S; mm[m] += outs[k].msum[m] / (double)S; cm[m] += outs[k].csum[m] / (double)S; }
+	}
 	/* ---- minimum Kullback-Leibler estimate ---- */
 	{
 		int P = mkl_P(&g), ms = (int)a[10], c, nblk, itbest = 0; long bi = 0; double fbest = 0, ms2 = 0.0, mev[3] = {0, 0, 0};
@@ -836,12 +1020,22 @@ static int run_chains(const Model *gp, long L) {
 		  for (m = 0; m < (long)n * n; m++) PUT(EY[m]);
 		  for (m = 0; m < P; m++) PUT(xs[(size_t)cbest * P + m]);
 		  PUT((double)(bi + 1)); PUT((double)itbest); PUT(fbest);
+		  if (g.io_on) {
+			  for (m = 0; m < S * qo; m++) PUT(pOb[m]);
+			  for (m = 0; m < S; m++) PUT(pOs2[m]);
+			  for (m = 0; m < S; m++) PUT(pOl[m]);
+			  for (m = 0; m < (long)n * n; m++) PUT(Wm[m]);
+			  for (m = 0; m < n; m++) PUT(mum[m]);
+			  for (m = 0; m < n; m++) PUT(mm[m]);
+			  for (m = 0; m < n; m++) PUT(cm[m]);
+		  }
 #undef PUT
 		}
 	}
 	(void)na; (void)j;
 cleanup:
-	if (outs) for (k = 0; k < C; k++) { free(outs[k].Dsum); free(outs[k].EYsum); }
+	if (outs) for (k = 0; k < C; k++) { free(outs[k].Dsum); free(outs[k].EYsum); free(outs[k].Wsum); free(outs[k].musum); free(outs[k].msum); free(outs[k].csum); }
+	free(pOb); free(pOs2); free(pOl); free(Wm); free(mum); free(mm); free(cm);
 	free(outs); free(jobs); free(pDisp); free(pBeta); free(pLlk); free(pS2); free(pEv); free(pZ); free(pE); free(pMu); free(pLam); free(pK);
 	free(EY); free(Dm); free(kls); free(xs); free(fo); free(its); free(sel);
 	return rc;
@@ -1010,6 +1204,7 @@ STDLL stata_call(int argc, char *argv[]) {
 	long L = 0;
 	Model g;
 	State s;
+	memset(&s, 0, sizeof(s));
 	if (argc < 1) { SF_error("lsm_sim: missing argument string\n"); return 198; }
 	buf = malloc(strlen(argv[0]) + 1);
 	if (!buf) return 909;
@@ -1025,6 +1220,7 @@ STDLL stata_call(int argc, char *argv[]) {
 	memcpy(s.beta, g.beta, sizeof(double) * g.K); memcpy(s.Z, g.Z, sizeof(double) * g.n * g.d); s.disp = g.disp0;
 	{ int t; for (t = 0; t < 3; t++) memcpy(s.eff[t], g.e0 + (long)t * g.n, sizeof(double) * g.n); }
 	state_rebuild(&s);
+	if (g.io_on) { memcpy(s.ob, g.io_ob0, sizeof(double) * (g.io_p + 1)); s.osig2 = g.io_s20; infl_setxb(&s); infl_rebuild(&s); }
 	{
 		int n = g.n, d = g.d;
 		if (code == 1) {
@@ -1068,6 +1264,27 @@ STDLL stata_call(int argc, char *argv[]) {
 				}
 			}
 			free(x); free(gr); free(EY);
+		}
+		else if (code == 5 && g.io_on) { /* outcome log likelihood and the weighted means m_k at the start state */
+			int k;
+			SF_vstore(2, 1, infl_ll(&s));
+			for (k = 0; k < n; k++) SF_vstore(2, (ST_int)(2 + k), infl_m(s.inum[k], s.iden[k]));
+		}
+		else if (code == 6 && g.io_on) { /* "6 L i z_1 .. z_d": change of the outcome log likelihood when actor i moves to z; then the same by full recomputation */
+			int i = 0, k; double zn[64], dll, l0, l1;
+			tok = strtok(NULL, " \t"); i = tok ? (int)atof(tok) - 1 : -1;
+			for (k = 0; k < d; k++) { tok = strtok(NULL, " \t"); zn[k] = tok ? atof(tok) : 0.0; }
+			if (i < 0 || i >= n || d > 64) { SF_error("lsm_sim: bad actor\n"); rc = 198; }
+			else {
+				l0 = infl_ll(&s);
+				(void)actor_dll(&s, i, zn); dll = infl_dll(&s, i);
+				actor_commit(&s, i, zn); infl_commit(&s, i);
+				l1 = infl_ll(&s);
+				SF_vstore(2, 1, dll);
+				infl_rebuild(&s);
+				SF_vstore(2, 2, infl_ll(&s) - l0);
+				SF_vstore(2, 3, l1 - l0);
+			}
 		}
 		else if (code == 10) { rc = run_chains(&g, L); }
 		else if (code == 20) { rc = run_gof(&g, L, NULL); }

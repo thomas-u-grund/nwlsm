@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 0.5.0  19nov2026 author: Thomas Grund}{...}
+{* *! version 0.6.0  19nov2026 author: Thomas Grund}{...}
 {title:Title}
 
 {p2colset 9 20 27 2}{...}
@@ -18,7 +18,7 @@
 {synopt :{opt mean}}plot the mean of the aligned draws {cmd:e(Zmean)} instead of the minimum Kullback-Leibler positions {cmd:e(Z)}{p_end}
 {synopt :{opt color(varname)}}colour the actors by the values of a variable (at most 15 values){p_end}
 {synopt :{opt clus:ters}}colour the actors by their latent cluster (after {cmd:nwlsm, clusters()}); not with {opt color()}{p_end}
-{synopt :{opt size(spec)}}size the actors by {cmd:sender}, {cmd:receiver} or {cmd:sociality} (posterior mean effects of the fit) or by a numeric variable{p_end}
+{synopt :{opt size(spec)}}size the actors by {cmd:sender}, {cmd:receiver} or {cmd:sociality} (posterior mean effects of the fit), by {cmd:influence} (the influence each actor exerts, after the influence model) or by a numeric variable{p_end}
 {synopt :{opt label(varname)}}label the actors with a string variable{p_end}
 {synopt :{opt noedges}}do not draw the ties{p_end}
 {synopt :{opt edgecolor(string)}}colour of the tie lines; default {cmd:gs11%60}{p_end}
@@ -48,4 +48,4 @@ orientation of the axes carries no meaning.
 {psee}{help nwlsm}, {help nwplot}{p_end}
 
 {hline}
-{pstd}{it:nwlsm version 0.5.0, 19 November 2026}{p_end}{* nwversion}
+{pstd}{it:nwlsm version 0.6.0, 19 November 2026}{p_end}{* nwversion}

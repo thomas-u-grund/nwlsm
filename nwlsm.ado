@@ -1,4 +1,4 @@
-*! version 0.5.0  19nov2026 nwlsm
+*! version 0.6.0  19nov2026 nwlsm
 * Copyright (C) 2026 Thomas U. Grund
 * This file is part of nwlsm, a Stata package for latent space models for networks. It follows the latent space model of
 * Hoff, Raftery and Handcock (2002) as implemented in the R package latentnet (Krivitsky and Handcock) and is written independently.
@@ -22,7 +22,8 @@ program nwlsm, eclass
 	}
 	syntax anything(name=netname) [, Dim(integer 2) EDGEcov(string) ABSdiff(string) NSample(integer 4000) BURNin(integer 10000) ///
 		INTerval(integer 10) SEED(string) PILOT(integer 4) PLEN(integer 500) RANDOMstart SAVEDraws(string) ///
-		SENDER RECEIVER SOCiality SENDERVar(real 1) SENDERDf(real 3) RECEIVERVar(real 1) RECEIVERDf(real 3) SOCIALITYVar(real 1) SOCIALITYDf(real 3) BILinear MKLStarts(integer 1) CHAins(integer 1) THReads(integer 0) CLUsters(integer 0) FAMily(string) TRIals(string) DISPVar(real 1) DISPDf(real 3)]
+		SENDER RECEIVER SOCiality SENDERVar(real 1) SENDERDf(real 3) RECEIVERVar(real 1) RECEIVERDf(real 3) SOCIALITYVar(real 1) SOCIALITYDf(real 3) BILinear MKLStarts(integer 1) CHAins(integer 1) THReads(integer 0) CLUsters(integer 0) FAMily(string) TRIals(string) DISPVar(real 1) DISPDf(real 3) ///
+		INFluence(string) NEIghbors(integer 0) WEIght(string) OBVar(real 100) OSIGma(numlist min=2 max=2 >0)]
 	if `dim' < 1 | `dim' > 10 {
 		di as error "dim() must be an integer between 1 and 10"
 		error 198
@@ -98,6 +99,46 @@ program nwlsm, eclass
 			error 198
 		}
 	}
+	local __io 0
+	if `"`influence'"' != "" {
+		local __io 1
+		if "`bilinear'" != "" {
+			di as error "influence() needs distances between the latent positions: it cannot be combined with bilinear"
+			error 198
+		}
+		if `neighbors' < 0 {
+			di as error "neighbors() must be a positive integer (the default, 0, uses all other actors)"
+			error 198
+		}
+		if `obvar' <= 0 {
+			di as error "obvar() must be positive"
+			error 198
+		}
+		local __wt 0
+		local __wtname "invdist"
+		if `"`weight'"' != "" {
+			local __wl = lower(`"`weight'"')
+			if inlist("`__wl'", "invdist", "inverse") local __wt 0
+			else if inlist("`__wl'", "expdist", "exp") {
+				local __wt 1
+				local __wtname "expdist"
+			}
+			else {
+				di as error "{p 0 0 2}weight() must be invdist (weights proportional to 1/distance, as in Sweet and Adhikari 2020) or expdist (weights proportional to exp(-distance)).{p_end}"
+				error 198
+			}
+		}
+		local __osa 0.01
+		local __osb 0.01
+		if "`osigma'" != "" {
+			local __osa : word 1 of `osigma'
+			local __osb : word 2 of `osigma'
+		}
+	}
+	else if `neighbors' != 0 | `"`weight'"' != "" | "`osigma'" != "" | `obvar' != 100 {
+		di as error "neighbors(), weight(), obvar() and osigma() belong to influence()"
+		error 198
+	}
 	_nwlsm_libcheck
 	set more off
 	_nwsyntax `netname', max(1)
@@ -117,6 +158,45 @@ program nwlsm, eclass
 		error 198
 	}
 	local __dir = ("`directed'" == "true")
+	local __onames
+	if `__io' {
+		capture unab __ivars : `influence'
+		if _rc {
+			di as error "influence(): not a list of variables in the current dataset"
+			error 111
+		}
+		local __ni : word count `__ivars'
+		if `__ni' < 2 {
+			di as error "{p 0 0 2}influence() needs the outcome variable and the lagged outcome variable (the outcome measured before the network), then any other regressors.{p_end}"
+			error 198
+		}
+		local __ivd : list dups __ivars
+		if "`__ivd'" != "" {
+			di as error "influence(): the same variable is listed twice"
+			error 198
+		}
+		confirm numeric variable `__ivars'
+		if _N != `nodes' {
+			di as error "{p 0 0 2}influence() needs one observation per actor in the current dataset, in the order of the actors of {bf:`netname'} (the dataset has `=_N' observations, the network `nodes' actors).{p_end}"
+			error 198
+		}
+		if `__ni' > 39 {
+			di as error "influence(): at most 37 regressors besides the lagged outcome"
+			error 198
+		}
+		foreach __v of local __ivars {
+			mata: st_local("__hm", strofreal(hasmissing(st_data(., "`__v'"))))
+			if `__hm' {
+				di as error "influence(): variable {bf:`__v'} has missing values"
+				error 416
+			}
+		}
+		local __ov : word 1 of `__ivars'
+		local __lv : word 2 of `__ivars'
+		local __onames "_cons `=subinstr("`__ivars'", "`__ov' ", "", 1)' influence"
+		capture mata: mata drop __nwlsm_in
+		mata: __nwlsm_in = st_data(., ("`__ov'", "`__lv'")), J(`nodes', 1, 1), st_data(., tokens("`=subinstr("`__ivars'", "`__ov' ", "", 1)'"))
+	}
 	if !`__dir' & ("`sender'" != "" | "`receiver'" != "") {
 		di as error "{p 0 0 2}sender and receiver effects need a directed network; use {bf:sociality} for the undirected network {bf:`netname'}.{p_end}"
 		error 198
@@ -125,7 +205,7 @@ program nwlsm, eclass
 		di as error "sociality cannot be combined with sender or receiver effects in an undirected network"
 		error 198
 	}
-	local __opt "`=("`sender'" != "")' `=("`receiver'" != "")' `=("`sociality'" != "")' `=("`bilinear'" != "")' `sendervar' `senderdf' `receivervar' `receiverdf' `socialityvar' `socialitydf' `mklstarts' `chains' `threads' `clusters' `__fam' `dispvar' `dispdf'"
+	local __opt "`=("`sender'" != "")' `=("`receiver'" != "")' `=("`sociality'" != "")' `=("`bilinear'" != "")' `sendervar' `senderdf' `receivervar' `receiverdf' `socialityvar' `socialitydf' `mklstarts' `chains' `threads' `clusters' `__fam' `dispvar' `dispdf'`=cond(`__io', " `neighbors' `__wt' `obvar' `__osa' `__osb'", "")'"
 	capture mata: mata drop __nwlsm_y
 	capture mata: mata drop __nwlsm_X
 	capture mata: mata drop __nwlsm_tr
@@ -250,18 +330,36 @@ program nwlsm, eclass
 	}
 	if `"`seed'"' == "" local __seed = floor(runiform() * 2147483646) + 1
 	else local __seed = `seed'
-	tempname B V T D Z ACC PP MB ZM ME VT ES ER EO RH QM CM LM CLS
+	tempname B V T D Z ACC PP MB ZM ME VT ES ER EO RH QM CM LM CLS WM PRM
+	if !`__io' mata: __nwlsm_in = J(0, 0, .)
 	capture noisily mata: LsmFit(__nwlsm_y, `__dir', __nwlsm_X, `dim', `nsample', `burnin', `interval', `__seed', `pilot', `plen', ///
-		`=("`randomstart'" != "")', strtoreal(tokens("`__opt'")), ("`B'", "`V'", "`T'", "`D'", "`Z'", "`ACC'", "`PP'", "`MB'", "`ZM'", "`ME'", "`VT'", "`ES'", "`ER'", "`EO'", "`RH'", "`QM'", "`CM'", "`LM'", "`CLS'"), __nwlsm_tr)
+		`=("`randomstart'" != "")', strtoreal(tokens("`__opt'")), ("`B'", "`V'", "`T'", "`D'", "`Z'", "`ACC'", "`PP'", "`MB'", "`ZM'", "`ME'", "`VT'", "`ES'", "`ER'", "`EO'", "`RH'", "`QM'", "`CM'", "`LM'", "`CLS'", "`WM'", "`PRM'"), __nwlsm_tr, __nwlsm_in)
 	local __rc = _rc
 	mata: st_local("__ny", strofreal(sum((__nwlsm_y :< .) :& (__nwlsm_y :!= .)) - sum(diagonal(__nwlsm_y) :< .)))
-	capture mata: mata drop __nwlsm_y __nwlsm_X __nwlsm_tr
+	capture mata: mata drop __nwlsm_y __nwlsm_X __nwlsm_tr __nwlsm_in
 	if `__rc' exit `__rc'
 	if !`__dir' local __ny = `__ny' / 2
-	matrix colnames `B' = `__names'
-	matrix rownames `V' = `__names'
-	matrix colnames `V' = `__names'
-	matrix rownames `T' = `__names'
+	local __allnames `__names'
+	local __eqs
+	if `__io' {
+		local __allnames `__names' `__onames'
+		foreach __c of local __names {
+			local __eqs `__eqs' network
+		}
+		foreach __c of local __onames {
+			local __eqs `__eqs' outcome
+		}
+	}
+	matrix colnames `B' = `__allnames'
+	matrix rownames `V' = `__allnames'
+	matrix colnames `V' = `__allnames'
+	matrix rownames `T' = `__allnames'
+	if `__io' {
+		matrix coleq `B' = `__eqs'
+		matrix roweq `V' = `__eqs'
+		matrix coleq `V' = `__eqs'
+		matrix roweq `T' = `__eqs'
+	}
 	matrix colnames `T' = mean sd mcse lower95 upper95
 	local __effs
 	if "`sender'" != "" local __effs `__effs' sender
@@ -280,19 +378,34 @@ program nwlsm, eclass
 		local __vn `__vn' `__e'_var
 	}
 	if `__fam' == 3 local __vn `__vn' dispersion
+	if `__io' local __vn `__vn' sigma2_y
 	matrix rownames `VT' = `__vn'
 	matrix colnames `VT' = mean sd mcse lower95 upper95
 	ereturn post `B' `V', obs(`__ny')
 	ereturn local cmd "nwlsm"
-	ereturn local version "0.5.0"
+	ereturn local version "0.6.0"
 	ereturn local estat_cmd "nwlsm_estat"
-	ereturn local title "Latent space model (`=cond("`bilinear'" != "", "bilinear", "Euclidean distance")'; `__famname' family), posterior by MCMC"
+	ereturn local title "`=cond(`__io', "Latent space model for social influence", "Latent space model")' (`=cond("`bilinear'" != "", "bilinear", "Euclidean distance")'; `__famname' family), posterior by MCMC"
 	ereturn local latent = cond("`bilinear'" != "", "bilinear", "euclidean")
 	ereturn local effects "`__effs'"
 	ereturn local family "`__famname'"
 	ereturn local network "`netname'"
 	ereturn local directed = cond(`__dir', "directed", "undirected")
 	ereturn local covariates "`__names'"
+	if `__io' {
+		ereturn local influence "yes"
+		ereturn local outcome "`__ov'"
+		ereturn local lagvar "`__lv'"
+		ereturn local ocovariates "`__onames'"
+		ereturn local weight "`__wtname'"
+		ereturn scalar neighbors = cond(`neighbors' <= 0 | `neighbors' >= `nodes' - 1, `nodes' - 1, `neighbors')
+		ereturn scalar obvar = `obvar'
+		ereturn scalar osigma_a = `__osa'
+		ereturn scalar osigma_b = `__osb'
+		ereturn scalar prob_positive = `__pb2'
+		ereturn scalar ll_outcome = `__ollk'
+		ereturn scalar ll_outcome_sd = `__ollksd'
+	}
 	ereturn local positions "minimum Kullback-Leibler (MKL) positions"
 	ereturn local start = cond("`randomstart'" != "", "random", cond(`__fam' == 0, "classical scaling of the geodesic distances", "classical scaling of the tie values"))
 	ereturn scalar N_nodes = `nodes'
@@ -331,7 +444,10 @@ program nwlsm, eclass
 	ereturn matrix vsummary = `VT'
 	ereturn matrix tuning = `ACC'
 	if `chains' > 1 {
-		local __rn : rownames e(summary)
+		local __rn `__names'
+		foreach __c of local __onames {
+			local __rn `__rn' y_`=cond("`__c'" == "_cons", "cons", "`__c'")'
+		}
 		local __rn `__rn' loglik `__vn'
 		matrix rownames `RH' = `__rn'
 		matrix colnames `RH' = rhat
@@ -376,6 +492,14 @@ program nwlsm, eclass
 		capture matrix rownames `D' = `labs'
 		capture matrix colnames `D' = `labs'
 		ereturn matrix D = `D'
+		if `__io' {
+			capture matrix rownames `WM' = `labs'
+			capture matrix colnames `WM' = `labs'
+			capture matrix rownames `PRM' = `labs'
+			matrix colnames `PRM' = outcome predicted exposure influence
+			ereturn matrix W = `WM'
+			ereturn matrix pred = `PRM'
+		}
 		ereturn matrix Z = `Z'
 		ereturn matrix Zmean = `ZM'
 		ereturn matrix P = `PP'
@@ -403,7 +527,7 @@ program nwlsm, eclass
 	if `"`savedraws'"' != "" {
 		preserve
 		clear
-		mata: LsmSaveDraws(tokens("`__names'"), strtoreal(tokens("`=("`sender'" != "")' `=("`receiver'" != "")' `=("`sociality'" != "")'")))
+		mata: LsmSaveDraws(tokens("`__names'"), strtoreal(tokens("`=("`sender'" != "")' `=("`receiver'" != "")' `=("`sociality'" != "")'")), tokens("`=subinstr("`__onames'", "_cons", "cons", 1)'"))
 		save `"`savedraws'"', replace
 		restore
 	}
@@ -422,16 +546,24 @@ program _nwlsm_display
 		di as text "Latent clusters: " as result e(clusters)
 	}
 	else if e(chains) > 1 di
-	di as text "Posterior mean log likelihood: " as result %9.3f e(ll_mean) as text " (sd " as result %6.3f e(ll_sd) as text ")"
+	di as text "Posterior mean log likelihood: " as result %9.3f e(ll_mean) as text " (sd " as result %6.3f e(ll_sd) as text ")" _c
+	if "`e(influence)'" == "yes" di as text "  outcome: " as result %9.3f e(ll_outcome) _c
+	di
 	di as text "{hline 78}"
 	di as text _col(25) %10s "Mean" %10s "Sd" %10s "MC s.e." %11s "Lower 95%" %10s "Upper 95%"
 	di as text "{hline 78}"
 	tempname T
 	matrix `T' = e(summary)
 	local nm : rownames `T'
+	local nnet = cond("`e(influence)'" == "yes", wordcount("`e(covariates)'"), .)
 	local k 0
+	if "`e(influence)'" == "yes" di as text "Network (ties)"
 	foreach c of local nm {
 		local ++k
+		if `k' == `nnet' + 1 {
+			di as text "{hline 78}"
+			di as text "Outcome: " as result "`e(outcome)'" as text " (weights: `e(weight)', " as result e(neighbors) as text " nearest actors)"
+		}
 		di as text %-24s abbrev("`c'", 23) _col(25) as result %10.4f `T'[`k', 1] %10.4f `T'[`k', 2] %10.4f `T'[`k', 3] %11.4f `T'[`k', 4] %10.4f `T'[`k', 5]
 	}
 	di as text "{hline 78}"
@@ -456,5 +588,6 @@ program _nwlsm_display
 		capture scalar drop __nwlsm_rmax
 	}
 	if e(clusters) > 0 di as text "{p 0 0 2}Latent clusters: {bf:estat clusters} lists the posterior membership probabilities and the classification; cluster means {bf:e(cmeans)}, mixing proportions {bf:e(lambda)}.{p_end}"
+	if "`e(influence)'" == "yes" di as text "{p 0 0 2}Influence model: {bf:estat influence} gives the influence effect, predictions and the actors who exert most influence; weights {bf:e(W)}.{p_end}"
 	di as text "{p 0 0 2}Positions: minimum Kullback-Leibler estimate {bf:e(Z)} (also {bf:estat positions}); mean of the draws aligned to it {bf:e(Zmean)}; posterior mean distances {bf:e(D)}; posterior mean tie probabilities {bf:e(P)}. Positions are identified up to rotation, reflection and translation only.{p_end}"
 end

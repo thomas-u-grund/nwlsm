@@ -1,4 +1,4 @@
-*! version 0.5.0  19nov2026 nwlsmplot
+*! version 0.6.0  19nov2026 nwlsmplot
 * Copyright (C) 2026 Thomas U. Grund. Part of nwlsm; GNU GPL-3 (see LICENSE).
 
 capture program drop nwlsmplot
@@ -54,7 +54,14 @@ program nwlsmplot
 	local sizevar
 	local sizeeff
 	if `"`size'"' != "" {
-		if inlist(`"`size'"', "sender", "receiver", "sociality") {
+		if `"`size'"' == "influence" {
+			if "`e(influence)'" != "yes" {
+				di as error "the fit has no influence model (option influence())"
+				exit 198
+			}
+			local sizeeff influence
+		}
+		else if inlist(`"`size'"', "sender", "receiver", "sociality") {
 			local __ef `"`e(effects)'"'
 			if !`: list size in __ef' {
 				di as error "the fit has no {bf:`size'} effect"
@@ -88,7 +95,12 @@ program nwlsmplot
 	local sizevec
 	if "`sizeeff'" != "" {
 		tempname EF
-		matrix `EF' = e(`sizeeff')
+		if "`sizeeff'" == "influence" {
+			tempname WW
+			matrix `WW' = e(W)
+			mata: st_matrix("`EF'", colsum(st_matrix("`WW'"))')
+		}
+		else matrix `EF' = e(`sizeeff')
 		local sizevec "`EF'"
 	}
 	mata: LsmPlotPrep("`A'", "`Z'", `d1', `d2', `=("`directed'" == "true")', "`=cond("`clusters'" != "", "", "`color'")'", "`clsvec'", "`sizevar'", "`sizevec'", "`label'", `=("`noedges'" == "")')

@@ -7,7 +7,7 @@ OK ok1, label("OK")
 CANCEL can1, label("Cancel")
 SUBMIT sub1, label("Submit")
 RESET res1
-POSITION 10 10 600 796
+POSITION 10 10 600 890
 
 SCRIPT PREINIT
 BEGIN
@@ -79,9 +79,21 @@ BEGIN
   GROUPBOX gb_out 10 596 580 84, label("Save")
   TEXT tx_sd 20 618 190 ., label("Draws to a data set (.dta):")
   FILE fi_sd 210 618 360 ., save label("Browse...") filter("Stata data (*.dta)|*.dta|All (*.*)|*.*") nomem
-  GROUPBOX gb_post 10 686 580 54, label("After the fit")
-  BUTTON bt_est 20 706 270 ., label("Postestimation (estat)...") onpush(script openestat)
-  BUTTON bt_plot 310 706 270 ., label("Plot of the positions...") onpush(script openplot)
+  GROUPBOX gb_inf 10 686 580 106, label("Social influence on an outcome (optional; Sweet and Adhikari 2020)")
+  TEXT tx_inf 20 706 260 ., label("Outcome, lagged outcome, other regressors:")
+  VARLIST vl_inf 290 706 290 ., nomem
+  TEXT tx_nb 20 732 190 ., label("Nearest actors (0 = all):")
+  SPINNER sp_nb 210 732 70 ., default(0) min(0) max(100000) nomem
+  TEXT tx_wt 300 732 70 ., label("Weights:")
+  COMBOBOX cb_wt 370 732 210 ., dropdownlist contents(l_wt) values(l_wt_v) nomem
+  TEXT tx_ob 20 758 190 ., label("Prior variance of coefficients:")
+  EDIT ed_ob 210 758 70 ., nomem
+  TEXT tx_os 300 758 120 ., label("Error variance prior a, b:")
+  EDIT ed_oa 425 758 70 ., nomem
+  EDIT ed_oq 505 758 70 ., nomem
+  GROUPBOX gb_post 10 798 580 54, label("After the fit")
+  BUTTON bt_est 20 818 270 ., label("Postestimation (estat)...") onpush(script openestat)
+  BUTTON bt_plot 310 818 270 ., label("Plot of the positions...") onpush(script openplot)
 END
 
 LIST l_fam
@@ -90,6 +102,18 @@ BEGIN
 	Poisson (counts)
 	binomial (counts with trials)
 	normal (real values)
+END
+
+LIST l_wt
+BEGIN
+	inverse distance, 1/d (as in the paper)
+	exponential, exp(-d)
+END
+
+LIST l_wt_v
+BEGIN
+	invdist
+	expdist
 END
 
 LIST l_fam_v
@@ -174,8 +198,40 @@ BEGIN
 	if main.ed_dd.isneq("") & !main.ed_dd.isnumlist() {
 		stopbox stop "Dispersion prior degrees of freedom: enter a positive number."
 	}
+	if main.vl_inf.isneq("") {
+		if main.ed_ob.isneq("") & !main.ed_ob.isnumlist() {
+			stopbox stop "Prior variance of the outcome coefficients: enter a positive number."
+		}
+		if main.ed_oa.isneq("") & main.ed_oq.iseq("") {
+			stopbox stop "Error variance prior: enter both a and b, or neither."
+		}
+		if main.ed_oa.iseq("") & main.ed_oq.isneq("") {
+			stopbox stop "Error variance prior: enter both a and b, or neither."
+		}
+		if main.ed_oa.isneq("") & !main.ed_oa.isnumlist() {
+			stopbox stop "Error variance prior a: enter a positive number."
+		}
+		if main.ed_oq.isneq("") & !main.ed_oq.isnumlist() {
+			stopbox stop "Error variance prior b: enter a positive number."
+		}
+	}
 	put "nwlsm " main.cb_net
 	put ","
+	if main.vl_inf.isneq("") {
+		put " influence(" main.vl_inf ")"
+		if !main.sp_nb.isdefault() {
+			put " neighbors(" main.sp_nb ")"
+		}
+		if main.cb_wt.iseq("expdist") {
+			put " weight(expdist)"
+		}
+		if main.ed_ob.isneq("") {
+			put " obvar(" main.ed_ob ")"
+		}
+		if main.ed_oa.isneq("") & main.ed_oq.isneq("") {
+			put " osigma(" main.ed_oa " " main.ed_oq ")"
+		}
+	}
 	if main.cb_fam.isneq("bernoulli") & main.cb_fam.isneq("") {
 		put " family(" main.cb_fam ")"
 	}
