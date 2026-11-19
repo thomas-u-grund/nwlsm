@@ -583,24 +583,26 @@ transmorphic matrix LsmSample(string scalar what)
 void LsmSaveDraws(string rowvector names, real rowvector act)
 {
 	real scalar k, S
-	string rowvector vn
+	string scalar vn
+	string rowvector vnn
 	external __nwlsm_beta, __nwlsm_llk, __nwlsm_s2, __nwlsm_ev
 
 	S = rows(__nwlsm_beta)
 	st_addobs(S)
 	for (k = 1; k <= cols(__nwlsm_beta); k++) {
-		(void) st_addvar("double", names[k])
-		st_store(., names[k], __nwlsm_beta[., k])
+		vn = (names[k] == "_cons" ? "beta_cons" : names[k])
+		(void) st_addvar("double", vn)
+		st_store(., vn, __nwlsm_beta[., k])
 	}
 	(void) st_addvar("double", "loglik")
 	st_store(., "loglik", __nwlsm_llk)
 	(void) st_addvar("double", "sigma2")
 	st_store(., "sigma2", __nwlsm_s2)
-	vn = ("sender_var", "receiver_var", "sociality_var")
+	vnn = ("sender_var", "receiver_var", "sociality_var")
 	for (k = 1; k <= 3; k++) {
 		if (act[k]) {
-			(void) st_addvar("double", vn[k])
-			st_store(., vn[k], __nwlsm_ev[., k])
+			(void) st_addvar("double", vnn[k])
+			st_store(., vnn[k], __nwlsm_ev[., k])
 		}
 	}
 }

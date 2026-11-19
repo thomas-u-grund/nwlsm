@@ -4,7 +4,7 @@
 capture program drop nwlsmplot
 program nwlsmplot
 	version 14
-	syntax [, DIMs(numlist integer min=2 max=2 >=1) MEAN COLor(varname) SIZE(string) LABel(varname string) NOEDGES ///
+	syntax [, DIMs(numlist integer min=2 max=2 >=1) MEAN COLor(varname) SIZE(string) LABel(varname) NOEDGES ///
 		EDGEColor(string) EDGEWidth(string) MSIZE(string) NAME(string) *]
 	if "`e(cmd)'" != "nwlsm" error 301
 	tempname Z E
@@ -36,12 +36,10 @@ program nwlsmplot
 	local sizeeff
 	if `"`size'"' != "" {
 		if inlist(`"`size'"', "sender", "receiver", "sociality") {
-			if !`: list size in local(e(effects))' & `"`size'"' != "" {
-				local __ef `"`e(effects)'"'
-				if !`: list size in __ef' {
-					di as error "the fit has no {bf:`size'} effect"
-					exit 198
-				}
+			local __ef `"`e(effects)'"'
+			if !`: list size in __ef' {
+				di as error "the fit has no {bf:`size'} effect"
+				exit 198
 			}
 			local sizeeff `size'
 		}
@@ -52,6 +50,13 @@ program nwlsmplot
 				exit 198
 			}
 			local sizevar `size'
+		}
+	}
+	if "`label'" != "" {
+		capture confirm string variable `label'
+		if _rc {
+			di as error "label(): {bf:`label'} must be a string variable"
+			exit 198
 		}
 	}
 	if ("`color'" != "" | "`sizevar'" != "" | "`label'" != "") & _N != `n' {
@@ -68,7 +73,6 @@ program nwlsmplot
 		local sizevec "`EF'"
 	}
 	mata: LsmPlotPrep("`A'", "`Z'", `d1', `d2', `=("`directed'" == "true")', "`color'", "`sizevar'", "`sizevec'", "`label'", `=("`noedges'" == "")')
-	local m = rows(st_matrix("`A'")) * 0
 	mata: st_local("m", strofreal(rows(__nwlsm_ed)))
 	preserve
 	quietly {
@@ -105,6 +109,7 @@ program nwlsmplot
 			di as error "color(): the variable has more than 15 distinct values; recode it into groups"
 			exit 198
 		}
+		local pal navy maroon forest_green dkorange teal purple gold cyan olive magenta brown gs8 ltblue red green
 		local g 0
 		local order
 		local nplot = cond("`noedges'" == "" & `m' > 0, 1, 0)
@@ -112,17 +117,18 @@ program nwlsmplot
 			local ++g
 			local ++nplot
 			local lab "`v'"
-			local plots `"`plots' (scatter y x `wt' if cg == `v', mcolor(p`g'%80) `mopt')"'
+			local plots `"`plots' (scatter y x `wt' if cg == `v', mcolor(`: word `g' of `pal''%75) mlabcolor(`: word `g' of `pal'') `mopt')"'
 			local order `"`order' `nplot' "`lab'""'
 		}
 		local legend `"legend(order(`order') position(3) cols(1) title("`color'", size(small)))"'
 	}
 	else {
-		local plots `"`plots' (scatter y x `wt', mcolor(navy%75) `mopt')"'
+		local plots `"`plots' (scatter y x `wt', mcolor(navy%75) mlabcolor(navy) `mopt')"'
 		local legend "legend(off)"
 	}
-	local ttl "Latent positions"
-	twoway `plots', xtitle("dimension `d1'") ytitle("dimension `d2'") title("`ttl'") aspectratio(1) xlabel(, grid) ylabel(, grid) `legend' ///
+	local ttl `"title("Latent positions")"'
+	if strpos(`"`options'"', "title(") local ttl
+	twoway `plots', xtitle("dimension `d1'") ytitle("dimension `d2'") `ttl' aspectratio(1) xlabel(, grid) ylabel(, grid) `legend' ///
 		`=cond("`name'" != "", "name(`name', replace)", "")' `options'
 	restore
 end

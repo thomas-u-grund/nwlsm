@@ -213,6 +213,7 @@ program nwlsm, eclass
 		}
 		matrix colnames `Z' = `__dn'
 		matrix colnames `ZM' = `__dn'
+		local labs : subinstr local labs "," " ", all
 		if `"`labs'"' != "" {
 			foreach __m in Z ZM ME ES ER EO {
 				capture matrix rownames ``__m'' = `labs'
@@ -251,7 +252,6 @@ program nwlsm, eclass
 		preserve
 		clear
 		mata: LsmSaveDraws(tokens("`__names'"), strtoreal(tokens("`=("`sender'" != "")' `=("`receiver'" != "")' `=("`sociality'" != "")'")))
-		qui rename _cons beta_cons
 		save `"`savedraws'"', replace
 		restore
 	}

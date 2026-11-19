@@ -59,6 +59,7 @@ typedef struct {
 	int n, dir, nc, K, d, flags, lt;
 	int act[3];
 	double scale, df, s2;
+	double rz, re[3]; /* weak ridge of the MKL fit: precisions of the positions and of the effects */
 	double es[3], edf[3], ev0[3];
 	double *pvar, *beta, *Z, *x, *e0; /* x: nc blocks of n*n; e0: 3 blocks of n */
 	signed char *y;
@@ -266,6 +267,20 @@ static double mkl_fg(const Model *g, const double *EY, const double *x, double *
 			for (k = 0; k < d; k++) { double u = ge * (Z[i * d + k] - Z[j * d + k]) / dd; grad[i * d + k] -= u; grad[j * d + k] += u; }
 		} else {
 			for (k = 0; k < d; k++) { grad[i * d + k] += ge * Z[j * d + k]; grad[j * d + k] += ge * Z[i * d + k]; }
+		}
+	}
+	if (g->rz > 0.0) {
+		f -= 0.5 * g->rz * sumsq(Z, n * d);
+		if (grad) for (k = 0; k < n * d; k++) grad[k] -= g->rz * Z[k];
+	}
+	{
+		int off = goff + g->K;
+		for (t = 0; t < 3; t++) if (g->act[t]) {
+			if (g->re[t] > 0.0) {
+				f -= 0.5 * g->re[t] * sumsq(eff[t], n);
+				if (grad) for (k = 0; k < n; k++) grad[off + k] -= g->re[t] * eff[t][k];
+			}
+			off += n;
 		}
 	}
 	return f;
@@ -481,7 +496,11 @@ static int run_chain(State *sp, const Model *gp, char **tok_state, int L) {
 		/* ---- MKL ---- */
 		{
 			double *EY = EYsum, *x0, *xb, *kls, fopt = 0, fbest = 0; long bi = 0; int P = mkl_P(&g), its, dr, ms = (int)a[10], c, itbest = 0, have = 0, j;
+			Model gm = g; double ms2 = 0.0, mev[3] = {0, 0, 0};
 			for (m = 0; m < (long)n * n; m++) EY[m] /= S;
+			for (dr = 0; dr < S; dr++) { ms2 += dS2[dr] / S; for (t = 0; t < 3; t++) mev[t] += dEv[(long)t * S + dr] / S; }
+			/* a very weak ridge (1/1000 of the posterior precision) keeps the optimiser from running away along flat directions */
+			gm.rz = 1e-3 / ms2; for (t = 0; t < 3; t++) gm.re[t] = g.act[t] ? 1e-3 / mev[t] : 0.0;
 			kls = malloc(sizeof(double) * S);
 			x0 = malloc(sizeof(double) * P); xb = malloc(sizeof(double) * P);
 			if (!kls || !x0 || !xb) { SF_error("lsm_sim: not enough memory\n"); rc = 909; free(kls); free(x0); free(xb); goto cleanup; }
@@ -506,9 +525,10 @@ static int run_chain(State *sp, const Model *gp, char **tok_state, int L) {
 				memcpy(x0, dZ + b * nd, sizeof(double) * nd);
 				memcpy(x0 + nd, dBeta + b * K, sizeof(double) * K);
 				{ int off2 = (int)nd + K; for (t = 0; t < 3; t++) if (g.act[t]) { memcpy(x0 + off2, dE + ((long)t * S + b) * n, sizeof(double) * n); off2 += n; } }
-				its = mkl_lbfgs(&g, EY, x0, 3000, &fopt);
+				its = mkl_lbfgs(&gm, EY, x0, 3000, &fopt);
 				if (!have || fopt > fbest) { have = 1; fbest = fopt; itbest = its; memcpy(xb, x0, sizeof(double) * P); bi = b; }
 			}
+			fbest = mkl_fg(&g, EY, xb, NULL, P);
 			off += (long)n * n;
 			for (m = 0; m < P; m++) SF_vstore(2, (ST_int)(1 + off + m), xb[m]);
 			off += P;
@@ -573,6 +593,7 @@ STDLL stata_call(int argc, char *argv[]) {
 				memcpy(x, s.Z, sizeof(double) * n * d); memcpy(x + off, s.beta, sizeof(double) * g.K); off += g.K;
 				for (t = 0; t < 3; t++) if (g.act[t]) { memcpy(x + off, s.eff[t], sizeof(double) * n); off += n; }
 				for (k = 0; k < n * n; k++) EY[k] = g.y[k] > 0 ? 0.9 : 0.15;
+				g.rz = 0.37; g.re[0] = 0.2; g.re[1] = 0.3; g.re[2] = 0.4;
 				f = mkl_fg(&g, EY, x, gr, P);
 				SF_vstore(2, 1, f);
 				for (k = 0; k < P; k++) SF_vstore(2, (ST_int)(2 + k), gr[k]);
