@@ -20,6 +20,15 @@ for (G in c(0, 2, 3)) {
   one(sprintf("bicsamp_g%d", G), samplike, frm, 100 + G, 1)
 }
 one("bicsamp_sr", samplike, "samplike ~ euclidean(d = 2) + rsender + rreceiver", 110, 1)
+# spread of the BIC with sender and receiver effects over seeds (the MKL effects are weakly identified: latentnet itself ends in different local optima); table in bicsamp_sr_seeds.csv
+sd <- NULL
+for (s in 1:12) {
+  set.seed(s)
+  f <- ergmm(samplike ~ euclidean(d = 2) + rsender + rreceiver, control = ctl)
+  b <- suppressMessages(bic.ergmm(f))
+  sd <- rbind(sd, data.frame(seed = s, rms_sender = sqrt(mean(f$mkl$sender^2)), rms_receiver = sqrt(mean(f$mkl$receiver^2)), overall = b$overall, sender_part = b$sender))
+}
+write.csv(sd, file.path(out, "bicsamp_sr_seeds.csv"), row.names = FALSE)
 el <- read.csv(file.path(out, "clu45_edges.csv")); n <- 45
 A <- matrix(0, n, n); for (k in seq_len(nrow(el))) { A[el$from[k], el$to[k]] <- 1; A[el$to[k], el$from[k]] <- 1 }
 neta <- network(A, directed = FALSE)
