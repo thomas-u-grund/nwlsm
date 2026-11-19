@@ -1,10 +1,10 @@
-*! version 0.3.0  19nov2026 nwlsmplot
+*! version 0.4.0  19nov2026 nwlsmplot
 * Copyright (C) 2026 Thomas U. Grund. Part of nwlsm; GNU GPL-3 (see LICENSE).
 
 capture program drop nwlsmplot
 program nwlsmplot
 	version 14
-	syntax [, DIMs(numlist integer min=2 max=2 >=1) MEAN COLor(varname) SIZE(string) LABel(varname) NOEDGES ///
+	syntax [, DIMs(numlist integer min=2 max=2 >=1) MEAN COLor(varname) SIZE(string) LABel(varname) NOEDGES CLUSters ///
 		EDGEColor(string) EDGEWidth(string) MSIZE(string) NAME(string) *]
 	if "`e(cmd)'" != "nwlsm" error 301
 	tempname Z E
@@ -24,6 +24,25 @@ program nwlsmplot
 	if `d1' > `d' | `d2' > `d' | `d1' == `d2' {
 		di as error "dims() must name two different dimensions between 1 and `d'"
 		exit 198
+	}
+	local clsvec
+	if "`clusters'" != "" {
+		if "`color'" != "" {
+			di as error "clusters and color() cannot be combined"
+			exit 198
+		}
+		if "`e(clusters)'" == "" | "`e(clusters)'" == "0" {
+			di as error "the model was fitted without latent clusters (option clusters())"
+			exit 198
+		}
+		tempname CLS
+		capture matrix `CLS' = e(class)
+		if _rc {
+			di as error "the classification was not stored (too many actors for a Stata matrix)"
+			exit 498
+		}
+		local clsvec "`CLS'"
+		local color "cluster"
 	}
 	_nwsyntax `e(network)', max(1)
 	if `nodes' != `n' {
@@ -59,7 +78,7 @@ program nwlsmplot
 			exit 198
 		}
 	}
-	if ("`color'" != "" | "`sizevar'" != "" | "`label'" != "") & _N != `n' {
+	if ("`color'" != "" & "`clusters'" == "" | "`sizevar'" != "" | "`label'" != "") & _N != `n' {
 		di as error "{p 0 0 2}color(), size() and label() take variables with one observation per actor in the order of the actors of {bf:`e(network)'}; the data set has `=_N' observations.{p_end}"
 		exit 198
 	}
@@ -72,7 +91,7 @@ program nwlsmplot
 		matrix `EF' = e(`sizeeff')
 		local sizevec "`EF'"
 	}
-	mata: LsmPlotPrep("`A'", "`Z'", `d1', `d2', `=("`directed'" == "true")', "`color'", "`sizevar'", "`sizevec'", "`label'", `=("`noedges'" == "")')
+	mata: LsmPlotPrep("`A'", "`Z'", `d1', `d2', `=("`directed'" == "true")', "`=cond("`clusters'" != "", "", "`color'")'", "`clsvec'", "`sizevar'", "`sizevec'", "`label'", `=("`noedges'" == "")')
 	mata: st_local("m", strofreal(rows(__nwlsm_ed)))
 	preserve
 	quietly {

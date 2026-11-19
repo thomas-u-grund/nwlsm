@@ -1,4 +1,4 @@
-*! version 0.3.0  19nov2026 nwlsm
+*! version 0.4.0  19nov2026 nwlsm
 * Copyright (C) 2026 Thomas U. Grund. Part of nwlsm; GNU GPL-3 (see LICENSE).
 capture program drop _nwlsm_libcheck
 program _nwlsm_libcheck

@@ -1,4 +1,4 @@
-*! version 0.3.0  19nov2026 nwlsm
+*! version 0.4.0  19nov2026 nwlsm
 * Copyright (C) 2026 Thomas U. Grund
 * This file is part of nwlsm, a Stata package for latent space models for networks. It follows the latent space model of
 * Hoff, Raftery and Handcock (2002) as implemented in the R package latentnet (Krivitsky and Handcock) and is written independently.

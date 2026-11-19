@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 0.3.0  19nov2026 author: Thomas Grund}{...}
+{* *! version 0.4.0  19nov2026 author: Thomas Grund}{...}
 {title:Title}
 
 {p2colset 9 17 24 2}{...}
@@ -15,7 +15,7 @@
 {cmd:nwlsm}  (replay after a fit)
 
 {p 8 16 2}
-{cmd:estat} {c -(}{cmd:positions}|{cmd:mcmcdiag}|{cmd:predict}{c )-} [{cmd:,} {it:options}]
+{cmd:estat} {c -(}{cmd:positions}|{cmd:mcmcdiag}|{cmd:clusters}|{cmd:predict}{c )-} [{cmd:,} {it:options}]
 
 {p 8 16 2}
 {cmd:nwlsm version}
@@ -34,12 +34,15 @@
 {synopt :{opt soc:iality}}random sociality effect for every actor, added to both ends of a tie (undirected and directed networks){p_end}
 {synopt :{opt sendervar(#)}, {opt senderdf(#)}}scale (default 1) and degrees of freedom (default 3) of the prior of the sender variance; likewise {opt receivervar()}, {opt receiverdf()}, {opt socialityvar()}, {opt socialitydf()}{p_end}
 {synopt :{opt bil:inear}}bilinear (inner-product) latent term instead of the distance{p_end}
-{synopt :{opt nsample(#)}}number of posterior draws kept; default {cmd:4000}{p_end}
+{synopt :{opt clus:ters(#)}}number of latent clusters, 2 to 6 (latentnet's {cmd:G}); default none{p_end}
+{synopt :{opt nsample(#)}}number of posterior draws kept (in all chains together); default {cmd:4000}{p_end}
 {synopt :{opt burnin(#)}}sweeps discarded after the tuning runs; default {cmd:10000}{p_end}
 {synopt :{opt interval(#)}}sweeps between two kept draws; default {cmd:10}{p_end}
 {synopt :{opt pilot(#)}}number of tuning runs for the step sizes; default {cmd:4}{p_end}
 {synopt :{opt plen(#)}}sweeps in each tuning run; default {cmd:500}{p_end}
-{synopt :{opt mklstarts(#)}}number of starting points of the minimum Kullback-Leibler fit; default {cmd:5}{p_end}
+{synopt :{opt mklstarts(#)}}number of starting points of the minimum Kullback-Leibler fit; default {cmd:1}{p_end}
+{synopt :{opt chai:ns(#)}}number of independent chains, run in parallel and pooled; default {cmd:1}{p_end}
+{synopt :{opt thr:eads(#)}}number of threads; default: one per core of the computer; the result does not depend on it{p_end}
 {synopt :{opt seed(#)}}random-number seed (default: drawn from Stata's generator, so {cmd:set seed} makes a fit reproducible){p_end}
 {synopt :{opt randoms:tart}}random start positions instead of classical scaling{p_end}
 {synopt :{opt savedraws(filename)}}save the draws of the coefficients, the log likelihood and the variances to a Stata data set{p_end}
@@ -89,8 +92,8 @@ posterior interval (2.5th and 97.5th percentile) of every coefficient, followed 
 Positions are identified only up to rotation, reflection and translation (in the bilinear model only up to rotation and reflection). {cmd:e(Z)} holds the minimum
 Kullback-Leibler (MKL) positions of latentnet (Handcock, Raftery and Tantrum 2007): the positions, coefficients and random effects that maximise the likelihood of the
 posterior mean tie probabilities, so that the fitted tie probabilities are as close as possible, in the Kullback-Leibler sense, to the posterior mean probabilities.
-The optimisation starts from the {opt mklstarts()} draws whose tie probabilities are closest to the posterior mean probabilities and keeps the best result; the
-MKL fit can have several local optima, and {cmd:mklstarts(1)} starts from the closest draw only, as latentnet does. The fit carries a very weak penalty on the positions and
+The optimisation starts from the draw whose tie probabilities are closest to the posterior mean probabilities, as in latentnet. The MKL fit can have several local optima;
+{opt mklstarts(#)} starts from the {it:#} closest draws instead and keeps the best result. The fit carries a very weak penalty on the positions and
 the random effects (one thousandth of the posterior precision) that keeps the optimiser from running away along directions in which the likelihood is flat; latentnet has no such
 penalty. The effects of the MKL fit are centred and their means moved into the intercept {cmd:e(mkl_b)}; {cmd:e(mkl_effects)} holds them. {cmd:e(Zmean)} is the mean of the draws, each aligned
 to the MKL positions by Procrustes analysis (rotation and reflection, no scaling); it is shrunken toward the centre. {cmd:e(D)} is the matrix of posterior mean distances between the actors (for
@@ -102,7 +105,10 @@ These matrices are stored when the number of actors fits into a Stata matrix.
 {p2colreset}{...}
 {synopt :{cmd:e(N)}}number of dyads (pairs for an undirected network){p_end}
 {synopt :{cmd:e(N_nodes)}}number of actors{p_end}
-{synopt :{cmd:e(dim)}, {cmd:e(nsample)}, {cmd:e(burnin)}, {cmd:e(interval)}, {cmd:e(seed)}, {cmd:e(mklstarts)}}settings of the run{p_end}
+{synopt :{cmd:e(dim)}, {cmd:e(nsample)}, {cmd:e(burnin)}, {cmd:e(interval)}, {cmd:e(seed)}, {cmd:e(mklstarts)}}settings of the run ({cmd:e(nsample)}: draws in all chains){p_end}
+{synopt :{cmd:e(chains)}, {cmd:e(nsample_chain)}, {cmd:e(threads)}, {cmd:e(clusters)}}number of chains, draws per chain, threads requested (0: one per core), number of latent clusters{p_end}
+{synopt :{cmd:e(rhat)}}Gelman-Rubin statistics (several chains){p_end}
+{synopt :{cmd:e(Q)}, {cmd:e(class)}, {cmd:e(cmeans)}, {cmd:e(lambda)}}latent clusters: membership probabilities, classification, cluster centres, mixing proportions{p_end}
 {synopt :{cmd:e(ll_mean)}, {cmd:e(ll_sd)}}posterior mean and standard deviation of the log likelihood{p_end}
 {synopt :{cmd:e(sigma2_mean)}, {cmd:e(sigma2_sd)}}posterior mean and standard deviation of s2{p_end}
 {synopt :{cmd:e(prior_scale)}, {cmd:e(prior_df)}}scale and degrees of freedom of the prior of s2{p_end}
@@ -119,9 +125,34 @@ These matrices are stored when the number of actors fits into a Stata matrix.
 {p2colreset}{...}
 
 {pstd}
-The full posterior sample stays in Mata after the fit: {cmd:mata: LsmSample("beta")} (draws by coefficient), {cmd:"llk"}, {cmd:"s2"}, {cmd:"ev"}
+The full posterior sample stays in Mata after the fit: {cmd:mata: LsmSample("beta")} (draws by coefficient), {cmd:"llk"}, {cmd:"s2"} (one column for each cluster with {opt clusters()}), {cmd:"class"} (the corrected memberships by draw), {cmd:"lambda"}, {cmd:"chains"}, {cmd:"ev"}
 (variances of the sender, receiver and sociality effects), {cmd:"E"} (the effects by draw), {cmd:"Z"}
 (one row per draw: the positions by actor, then dimension), {cmd:"Zalign"} (the aligned mean positions) and {cmd:"mkl"} (the MKL positions).
+
+{title:Chains, threads and speed}
+
+{pstd}
+With {opt chains(#)} the command runs {it:#} independent chains and pools their draws. {opt nsample()} is the number of draws in all chains together (divided between the chains, rounded up); every chain
+has its own burn-in and tuning runs, so that more chains shorten the run only as far as the burn-in allows. The first chain starts from the classical-scaling positions; the others start
+from over-dispersed versions of them, which is what the Gelman-Rubin statistic needs. Chain {it:k} uses the seed {opt seed()} + 1000003 {it:k}. Positions of different chains are rotated differently, so
+only rotation-invariant quantities are compared between chains: {cmd:estat mcmcdiag} shows the Gelman-Rubin potential scale reduction factor of the coefficients, the log likelihood and the variance
+parameters, and {cmd:e(rhat)} holds it; values close to 1 (below 1.1, say) indicate that the chains agree. The minimum Kullback-Leibler fit uses the pooled draws.
+
+{pstd}
+{opt threads()} sets how many threads the plugin uses (default: one per core). Chains are distributed over the threads first. Threads that are left over (more threads than chains) work
+inside a chain on the passes over all dyads (the updates of the coefficients) and on the minimum Kullback-Leibler fit, in networks of about 100 actors or more. A single chain cannot be
+made much faster than that, because its updates of the positions are sequential. The results for a given seed and {opt chains()} are exactly the same for every value of {opt threads()}.
+
+{title:Latent clusters}
+
+{pstd}
+{opt clusters(G)} replaces the single normal distribution of the positions by a mixture of {it:G} spherical normal distributions as in latentnet: z_i ~ N(mu_g, s2_g I) for actor {it:i} in cluster {it:g},
+mu_g ~ N(0, omega2 I), s2_g with a scaled inverse chi-squared prior, and mixing proportions with a Dirichlet prior. The defaults follow latentnet: scale 0.125 (n/G)^(2/d) and sqrt(n/G) degrees of freedom for the cluster variances,
+omega2 = 2 x 0.125 n^(2/d), and Dirichlet parameter sqrt(n/G). The memberships are sampled together with the other parameters. The labels of the clusters are arbitrary in every draw; they are corrected by
+permuting the labels of each draw to agree as well as possible with the posterior membership probabilities (first those of the draw that started the minimum Kullback-Leibler fit, then three rounds with the probabilities found so far).
+The result: {cmd:e(Q)} (posterior probability that an actor belongs to a cluster), {cmd:e(class)} (the most probable cluster of each actor), {cmd:e(cmeans)} (posterior mean cluster centres, aligned to the
+minimum Kullback-Leibler positions), {cmd:e(lambda)} (mixing proportions: mean and sd) and one variance for each cluster in {cmd:e(vsummary)}. The classification and the centres are label-corrected and aligned
+posterior means of the draws; they are not the mixture fitted to the positions by latentnet's minimum Kullback-Leibler procedure.
 
 {title:Post-estimation}
 
@@ -131,7 +162,11 @@ With {opt generate()} the coordinates go into the variables {it:stub}1, {it:stub
 
 {phang}
 {cmd:estat mcmcdiag} [{cmd:, nolist}] shows, for the coefficients, the log likelihood and the variance parameters, the posterior mean and standard deviation, the effective sample size
-(initial monotone positive sequence estimator of Geyer) and the Geweke z-score (first 10 percent of the draws against the last 50 percent) and returns them in {cmd:r(diag)}. It needs the draws of the last fit, which stay in memory.
+(initial monotone positive sequence estimator of Geyer), the Geweke z-score (first 10 percent of the draws against the last 50 percent) and, with several chains, the Gelman-Rubin statistic, and returns them in {cmd:r(diag)}. It needs the draws of the last fit, which stay in memory.
+
+{phang}
+{cmd:estat clusters} [{cmd:, generate(}{it:stub}{cmd:) nolist}] (after {opt clusters()}) lists the posterior membership probabilities and the classification and returns them in {cmd:r(Q)} and {cmd:r(class)}. With {opt generate()} the variables
+{it:stub}_class and {it:stub}_p1, {it:stub}_p2, ... are added to a data set with one observation per actor.
 
 {phang}
 {cmd:estat predict} [{cmd:, generate(}{it:netname}{cmd:) replace}] returns the posterior mean tie probabilities in {cmd:r(P)} and, with {opt generate()}, stores them as a valued network of the family.
@@ -148,6 +183,10 @@ With {opt generate()} the coordinates go into the variables {it:stub}1, {it:stub
 {phang2}{cmd:. estat mcmcdiag}{p_end}
 {phang2}{cmd:. estat positions, generate(pos)}{p_end}
 {phang2}{cmd:. estat predict, generate(pfriends)}{p_end}
+{phang2}{cmd:. nwlsm friends, dim(2) chains(4) nsample(4000)}{p_end}
+{phang2}{cmd:. nwlsm friends, dim(2) clusters(3)}{p_end}
+{phang2}{cmd:. estat clusters, generate(grp)}{p_end}
+{phang2}{cmd:. nwlsmplot, clusters}{p_end}
 {phang2}{cmd:. nwlsmplot, color(gender) size(sociality)}{p_end}
 
 {title:Reference}
@@ -158,4 +197,4 @@ With {opt generate()} the coordinates go into the variables {it:stub}1, {it:stub
 {p 4 8 2}Krivitsky, P. N., Handcock, M. S., Raftery, A. E. and Hoff, P. D. 2009. Representing degree distributions, clustering, and homophily in social networks with latent cluster random effects models. Social Networks 31: 204-213.{p_end}
 
 {hline}
-{pstd}{it:nwlsm version 0.3.0, 19 November 2026}{p_end}{* nwversion}
+{pstd}{it:nwlsm version 0.4.0, 19 November 2026}{p_end}{* nwversion}

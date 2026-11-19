@@ -1,0 +1,79 @@
+/* nwlsmplot.dlg - dialog of nwlsmplot (plot of the latent positions after nwlsm). */
+VERSION 14.0
+INCLUDE _std_small
+SYNCHRONOUS_ONLY
+HELP hlp1, view("help nwlsmplot")
+OK ok1, label("OK")
+CANCEL can1, label("Cancel")
+SUBMIT sub1, label("Submit")
+RESET res1
+POSITION 10 10 560 380
+
+DIALOG main, title("nwlsmplot - Plot of the latent positions")
+BEGIN
+  TEXT tx_d1 20 14 220 ., label("Dimensions on the x and y axes:")
+  SPINNER sp_d1 250 14 60 ., default(1) min(1) max(10) nomem
+  SPINNER sp_d2 320 14 60 ., default(2) min(1) max(10) nomem
+  CHECKBOX cx_mean 400 14 150 ., label("mean of the draws")
+  GROUPBOX gb_act 10 44 540 138, label("Actors (variables: one observation per actor, in the order of the actors)")
+  TEXT tx_col 20 64 220 ., label("Colour by variable:")
+  VARNAME vn_col 250 64 160 ., nomem
+  CHECKBOX cx_clu 420 64 120 ., label("by cluster")
+  TEXT tx_size 20 90 220 ., label("Size by (sender, receiver, sociality or variable):")
+  EDIT ed_size 250 90 160 ., nomem
+  TEXT tx_msize 20 116 220 ., label("Marker size (without size by):")
+  EDIT ed_msize 250 116 160 ., nomem
+  TEXT tx_lab 20 142 220 ., label("Label by string variable:")
+  VARNAME vn_lab 250 142 160 ., nomem
+  GROUPBOX gb_edg 10 190 540 86, label("Ties")
+  CHECKBOX cx_noe 20 210 220 ., label("do not draw the ties")
+  TEXT tx_ecol 20 238 100 ., label("Tie colour:")
+  EDIT ed_ecol 120 238 120 ., nomem
+  TEXT tx_ewid 270 238 100 ., label("Tie width:")
+  EDIT ed_ewid 370 238 120 ., nomem
+  TEXT tx_name 20 292 220 ., label("Graph name:")
+  EDIT ed_name 250 292 160 ., nomem
+  TEXT tx_note 20 324 520 ., label("Needs a fit of nwlsm in memory.")
+END
+
+PROGRAM command
+BEGIN
+	if main.cx_clu & main.vn_col.isneq("") {
+		stopbox stop "Colour by variable and by cluster cannot be combined."
+	}
+	put "nwlsmplot,"
+	if !main.sp_d1.isdefault() | !main.sp_d2.isdefault() {
+		put " dims(" main.sp_d1 " " main.sp_d2 ")"
+	}
+	if main.cx_mean {
+		put " mean"
+	}
+	if main.vn_col.isneq("") {
+		put " color(" main.vn_col ")"
+	}
+	if main.cx_clu {
+		put " clusters"
+	}
+	if main.ed_size.isneq("") {
+		put " size(" main.ed_size ")"
+	}
+	if main.ed_msize.isneq("") {
+		put " msize(" main.ed_msize ")"
+	}
+	if main.vn_lab.isneq("") {
+		put " label(" main.vn_lab ")"
+	}
+	if main.cx_noe {
+		put " noedges"
+	}
+	if main.ed_ecol.isneq("") {
+		put " edgecolor(" main.ed_ecol ")"
+	}
+	if main.ed_ewid.isneq("") {
+		put " edgewidth(" main.ed_ewid ")"
+	}
+	if main.ed_name.isneq("") {
+		put " name(" main.ed_name ")"
+	}
+	stata
+END

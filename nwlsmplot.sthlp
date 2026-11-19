@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 0.3.0  19nov2026 author: Thomas Grund}{...}
+{* *! version 0.4.0  19nov2026 author: Thomas Grund}{...}
 {title:Title}
 
 {p2colset 9 20 27 2}{...}
@@ -17,6 +17,7 @@
 {synopt :{opt dims(# #)}}the two latent dimensions on the axes; default {cmd:1 2}{p_end}
 {synopt :{opt mean}}plot the mean of the aligned draws {cmd:e(Zmean)} instead of the minimum Kullback-Leibler positions {cmd:e(Z)}{p_end}
 {synopt :{opt color(varname)}}colour the actors by the values of a variable (at most 15 values){p_end}
+{synopt :{opt clus:ters}}colour the actors by their latent cluster (after {cmd:nwlsm, clusters()}); not with {opt color()}{p_end}
 {synopt :{opt size(spec)}}size the actors by {cmd:sender}, {cmd:receiver} or {cmd:sociality} (posterior mean effects of the fit) or by a numeric variable{p_end}
 {synopt :{opt label(varname)}}label the actors with a string variable{p_end}
 {synopt :{opt noedges}}do not draw the ties{p_end}
@@ -39,6 +40,7 @@ orientation of the axes carries no meaning.
 
 {phang2}{cmd:. nwlsm friends, dim(2) sociality}{p_end}
 {phang2}{cmd:. nwlsmplot}{p_end}
+{phang2}{cmd:. nwlsmplot, clusters}{p_end}
 {phang2}{cmd:. nwlsmplot, color(gender) size(sociality) label(name) title("Friendship space")}{p_end}
 
 {title:Also see}
@@ -46,4 +48,4 @@ orientation of the axes carries no meaning.
 {psee}{help nwlsm}, {help nwplot}{p_end}
 
 {hline}
-{pstd}{it:nwlsm version 0.3.0, 19 November 2026}{p_end}{* nwversion}
+{pstd}{it:nwlsm version 0.4.0, 19 November 2026}{p_end}{* nwversion}

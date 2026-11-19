@@ -1,0 +1,199 @@
+/* nwlsm.dlg - dialog of nwlsm (latent space models for network ties, fitted by MCMC). */
+VERSION 14.0
+INCLUDE _std_small
+SYNCHRONOUS_ONLY
+HELP hlp1, view("help nwlsm")
+OK ok1, label("OK")
+CANCEL can1, label("Cancel")
+SUBMIT sub1, label("Submit")
+RESET res1
+POSITION 10 10 600 700
+
+SCRIPT PREINIT
+BEGIN
+	program initialize
+END
+
+DIALOG main, title("nwlsm - Latent space model")
+BEGIN
+  TEXT tx_net 20 12 260 ., label("Network:")
+  COMBOBOX cb_net 290 12 200 ., dropdown contents(netlist) nomem
+  GROUPBOX gb_mod 10 40 580 148, label("Model")
+  TEXT tx_dim 20 60 260 ., label("Latent dimensions:")
+  SPINNER sp_dim 290 60 70 ., default(2) min(1) max(10) nomem
+  CHECKBOX cx_bil 380 60 200 ., label("bilinear (inner product)")
+  TEXT tx_clu 20 86 260 ., label("Latent clusters (0 = none, else 2 to 6):")
+  SPINNER sp_clu 290 86 70 ., default(0) min(0) max(6) nomem
+  CHECKBOX cx_send 20 112 170 ., label("sender effect (directed)")
+  CHECKBOX cx_recv 200 112 180 ., label("receiver effect (directed)")
+  CHECKBOX cx_soc 390 112 190 ., label("sociality effect")
+  TEXT tx_edge 20 140 260 ., label("Edge covariates (networks or matrices):")
+  EDIT ed_edge 290 140 290 ., nomem
+  TEXT tx_abs 20 164 260 ., label("Absolute difference of node variables:")
+  VARLIST vl_abs 290 164 290 ., nomem
+  GROUPBOX gb_pri 10 194 580 108, label("Priors of the random effects (blank = default: scale 1, 3 degrees of freedom)")
+  TEXT tx_sv 20 214 120 ., label("sender scale, df:")
+  EDIT ed_sv 150 214 50 ., nomem
+  EDIT ed_sd 205 214 50 ., nomem
+  TEXT tx_rv 280 214 130 ., label("receiver scale, df:")
+  EDIT ed_rv 415 214 50 ., nomem
+  EDIT ed_rd 470 214 50 ., nomem
+  TEXT tx_ov 20 242 120 ., label("sociality scale, df:")
+  EDIT ed_ov 150 242 50 ., nomem
+  EDIT ed_od 205 242 50 ., nomem
+  TEXT tx_prn 20 270 560 ., label("Sender and receiver effects need a directed network; sociality works for both.")
+  GROUPBOX gb_mc 10 308 580 186, label("Sampler")
+  TEXT tx_ns 20 328 190 ., label("Draws kept (total):")
+  SPINNER sp_ns 210 328 90 ., default(4000) min(10) max(10000000) nomem
+  TEXT tx_bu 320 328 130 ., label("Burn-in sweeps:")
+  SPINNER sp_bu 450 328 110 ., default(10000) min(0) max(100000000) nomem
+  TEXT tx_int 20 354 190 ., label("Sweeps between draws:")
+  SPINNER sp_int 210 354 90 ., default(10) min(1) max(100000) nomem
+  TEXT tx_pil 320 354 130 ., label("Tuning runs:")
+  SPINNER sp_pil 450 354 110 ., default(4) min(0) max(1000) nomem
+  TEXT tx_plen 20 380 190 ., label("Sweeps per tuning run:")
+  SPINNER sp_plen 210 380 90 ., default(500) min(10) max(1000000) nomem
+  TEXT tx_mkl 320 380 130 ., label("MKL starts:")
+  SPINNER sp_mkl 450 380 110 ., default(1) min(1) max(1000) nomem
+  TEXT tx_ch 20 406 190 ., label("Chains (pooled):")
+  SPINNER sp_ch 210 406 90 ., default(1) min(1) max(64) nomem
+  TEXT tx_thr 320 406 130 ., label("Threads (0 = auto):")
+  SPINNER sp_thr 450 406 110 ., default(0) min(0) max(256) nomem
+  TEXT tx_seed 20 432 190 ., label("Random-number seed (blank = none):")
+  EDIT ed_seed 210 432 90 ., nomem
+  CHECKBOX cx_rs 320 432 250 ., label("random start positions")
+  TEXT tx_ch2 20 458 560 ., label("Several chains run in parallel threads; the draws are divided between the chains.")
+  GROUPBOX gb_out 10 500 580 84, label("Save")
+  TEXT tx_sd 20 522 190 ., label("Draws to a data set (.dta):")
+  FILE fi_sd 210 522 360 ., save label("Browse...") filter("Stata data (*.dta)|*.dta|All (*.*)|*.*") nomem
+  GROUPBOX gb_post 10 590 580 54, label("After the fit")
+  BUTTON bt_est 20 610 270 ., label("Postestimation (estat)...") onpush(script openestat)
+  BUTTON bt_plot 310 610 270 ., label("Plot of the positions...") onpush(script openplot)
+END
+
+LIST netlist
+BEGIN
+	// populated at runtime by _nwdialog.ado
+END
+
+PROGRAM initialize
+BEGIN
+	put "_nwdialog nwlsm"
+	stata hidden immediate
+END
+
+SCRIPT openestat
+BEGIN
+	view dialog nwlsm_estat
+END
+
+SCRIPT openplot
+BEGIN
+	view dialog nwlsmplot
+END
+
+PROGRAM command
+BEGIN
+	if main.cb_net.iseq(" ") | main.cb_net.iseq("") {
+		stopbox stop "Choose a network."
+	}
+	if main.ed_seed.isneq("") & !main.ed_seed.isnumlist() {
+		stopbox stop "Seed: enter an integer."
+	}
+	if main.ed_sv.isneq("") & !main.ed_sv.isnumlist() {
+		stopbox stop "Sender prior scale: enter a positive number."
+	}
+	if main.ed_sd.isneq("") & !main.ed_sd.isnumlist() {
+		stopbox stop "Sender prior degrees of freedom: enter a positive number."
+	}
+	if main.ed_rv.isneq("") & !main.ed_rv.isnumlist() {
+		stopbox stop "Receiver prior scale: enter a positive number."
+	}
+	if main.ed_rd.isneq("") & !main.ed_rd.isnumlist() {
+		stopbox stop "Receiver prior degrees of freedom: enter a positive number."
+	}
+	if main.ed_ov.isneq("") & !main.ed_ov.isnumlist() {
+		stopbox stop "Sociality prior scale: enter a positive number."
+	}
+	if main.ed_od.isneq("") & !main.ed_od.isnumlist() {
+		stopbox stop "Sociality prior degrees of freedom: enter a positive number."
+	}
+	put "nwlsm " main.cb_net
+	put ","
+	if !main.sp_dim.isdefault() {
+		put " dim(" main.sp_dim ")"
+	}
+	if main.ed_edge.isneq("") {
+		put " edgecov(" main.ed_edge ")"
+	}
+	if main.vl_abs.isneq("") {
+		put " absdiff(" main.vl_abs ")"
+	}
+	if main.cx_send {
+		put " sender"
+	}
+	if main.cx_recv {
+		put " receiver"
+	}
+	if main.cx_soc {
+		put " sociality"
+	}
+	if main.cx_bil {
+		put " bilinear"
+	}
+	if !main.sp_clu.isdefault() {
+		put " clusters(" main.sp_clu ")"
+	}
+	if main.ed_sv.isneq("") {
+		put " sendervar(" main.ed_sv ")"
+	}
+	if main.ed_sd.isneq("") {
+		put " senderdf(" main.ed_sd ")"
+	}
+	if main.ed_rv.isneq("") {
+		put " receivervar(" main.ed_rv ")"
+	}
+	if main.ed_rd.isneq("") {
+		put " receiverdf(" main.ed_rd ")"
+	}
+	if main.ed_ov.isneq("") {
+		put " socialityvar(" main.ed_ov ")"
+	}
+	if main.ed_od.isneq("") {
+		put " socialitydf(" main.ed_od ")"
+	}
+	if !main.sp_ns.isdefault() {
+		put " nsample(" main.sp_ns ")"
+	}
+	if !main.sp_bu.isdefault() {
+		put " burnin(" main.sp_bu ")"
+	}
+	if !main.sp_int.isdefault() {
+		put " interval(" main.sp_int ")"
+	}
+	if !main.sp_pil.isdefault() {
+		put " pilot(" main.sp_pil ")"
+	}
+	if !main.sp_plen.isdefault() {
+		put " plen(" main.sp_plen ")"
+	}
+	if !main.sp_mkl.isdefault() {
+		put " mklstarts(" main.sp_mkl ")"
+	}
+	if !main.sp_ch.isdefault() {
+		put " chains(" main.sp_ch ")"
+	}
+	if !main.sp_thr.isdefault() {
+		put " threads(" main.sp_thr ")"
+	}
+	if main.ed_seed.isneq("") {
+		put " seed(" main.ed_seed ")"
+	}
+	if main.cx_rs {
+		put " randomstart"
+	}
+	if main.fi_sd.isneq("") {
+		put " savedraws(" main.fi_sd ")"
+	}
+	stata
+END

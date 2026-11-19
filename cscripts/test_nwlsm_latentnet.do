@@ -5,7 +5,7 @@
 *  - posterior mean log likelihood within 2 posterior standard deviations of the latentnet value;
 *  - correlation of the upper triangles of the posterior mean distance matrices at least 0.98;
 *  - correlation of the pairwise distances of the minimum-KL positions with those of latentnet at least 0.90 (the objective of the minimum-KL fit has several local optima, so that the
-*    two programs can end in different ones in a sparse network; nwlsm starts from the best 5 draws and keeps the best optimum).
+*    two programs can end in different ones in a sparse network; nwlsm starts, like latentnet, from the closest draw (mklstarts(1))).
 do cscripts/nwlsm_testlib.do
 global NS 4
 capture program drop lsmt_cmp

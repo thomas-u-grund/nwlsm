@@ -3,7 +3,7 @@
 Owner: Thomas U. Grund (sole author). GPL-3. Part of the nwcommands family; depends only on the core. Native C plugin only (no Mata fallback).
 
 ## Status (2026-11-19)
-Stage 1 and the sender/receiver/sociality and bilinear parts of stage 2 are implemented (0.3.0); clusters and valued networks are open.
+Stage 1, the sender/receiver/sociality and bilinear parts and the latent clusters of stage 2 are implemented (0.4.0, with chains and threads); valued networks are open.
 
 ## Scope in stages
 1. **Base model (latentnet "euclidean")**: binary one-mode networks (undirected and directed), logit P(y_ij = 1) = beta0 + sum_k beta_k x_ijk - |z_i - z_j|, z_i in R^d. Posterior by MCMC (random-walk Metropolis-Hastings on beta and z; Gibbs for the latent-position variance). Output: posterior means and intervals of beta, posterior sample, positions after Procrustes alignment, and the minimum-Kullback-Leibler (MKL) positions, as latentnet. Edge covariates from nwcommands networks.

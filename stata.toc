@@ -1,5 +1,5 @@
 v 3
 d nwlsm: latent space models for networks in Stata
 
-p nwlsm Latent space models for networks v0.3.0
+p nwlsm Latent space models for networks v0.4.0
 d nwlsm. Latent space models for network ties (Hoff, Raftery and Handcock 2002), fitted by MCMC

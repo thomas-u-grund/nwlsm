@@ -1,0 +1,87 @@
+/* nwlsm_estat.dlg - dialog of estat after nwlsm: positions, mcmcdiag, clusters, predict. */
+VERSION 14.0
+INCLUDE _std_small
+SYNCHRONOUS_ONLY
+HELP hlp1, view("help nwlsm")
+OK ok1, label("OK")
+CANCEL can1, label("Cancel")
+SUBMIT sub1, label("Submit")
+RESET res1
+POSITION 10 10 560 330
+
+DIALOG main, title("estat - Postestimation after nwlsm")
+BEGIN
+  TEXT tx_note 20 10 520 ., label("Works on the nwlsm fit currently in memory.")
+  RADIO rb_pos 20 36 520 ., label("positions - the latent positions (and effects of the actors)") first default(1) onclickon(script pos_on)
+  RADIO rb_dia 20 58 520 ., label("mcmcdiag - effective sample sizes, Geweke z, Gelman-Rubin statistic") middle onclickon(script dia_on)
+  RADIO rb_clu 20 80 520 ., label("clusters - posterior membership probabilities and classification") middle onclickon(script clu_on)
+  RADIO rb_pre 20 102 520 ., label("predict - posterior mean tie probabilities") last onclickon(script pre_on)
+  GROUPBOX gb_opt 10 132 540 150, label("Options")
+  CHECKBOX cx_mean 20 154 500 ., label("mean: mean of the aligned draws instead of the MKL positions (positions)")
+  TEXT tx_gen 20 182 200 ., label("generate() (stub or network name):")
+  EDIT ed_gen 230 182 160 ., nomem
+  CHECKBOX cx_rep 20 208 500 ., label("replace an existing network (predict)")
+  CHECKBOX cx_nol 20 234 500 ., label("nolist: do not list the table")
+END
+
+SCRIPT pos_on
+BEGIN
+	main.cx_mean.enable
+	main.ed_gen.enable
+	main.cx_rep.disable
+	main.cx_nol.enable
+END
+
+SCRIPT dia_on
+BEGIN
+	main.cx_mean.disable
+	main.ed_gen.disable
+	main.cx_rep.disable
+	main.cx_nol.enable
+END
+
+SCRIPT clu_on
+BEGIN
+	main.cx_mean.disable
+	main.ed_gen.enable
+	main.cx_rep.disable
+	main.cx_nol.enable
+END
+
+SCRIPT pre_on
+BEGIN
+	main.cx_mean.disable
+	main.ed_gen.enable
+	main.cx_rep.enable
+	main.cx_nol.disable
+END
+
+PROGRAM command
+BEGIN
+	if main.rb_pos {
+		put "estat positions"
+	}
+	if main.rb_dia {
+		put "estat mcmcdiag"
+	}
+	if main.rb_clu {
+		put "estat clusters"
+	}
+	if main.rb_pre {
+		put "estat predict"
+	}
+	put ","
+	if main.cx_mean & main.rb_pos {
+		put " mean"
+	}
+	if main.ed_gen.isneq("") & !main.rb_dia {
+		put " generate(" main.ed_gen ")"
+	}
+	if main.cx_rep & main.rb_pre {
+		put " replace"
+	}
+	if main.cx_nol & !main.rb_pre {
+		put " nolist"
+	}
+	stata
+END

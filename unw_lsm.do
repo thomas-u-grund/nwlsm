@@ -839,7 +839,7 @@ real rowvector LsmCheckMKL(real matrix y, real scalar dir, real matrix X, real s
 }
 
 // plot data for nwlsmplot: node rows (x, y, colour group, weight, label) and edge rows (x1, y1, x2, y2) kept in externals until LsmPlotStore()
-void LsmPlotPrep(string scalar Aname, string scalar Zname, real scalar d1, real scalar d2, real scalar dir, string scalar color,
+void LsmPlotPrep(string scalar Aname, string scalar Zname, real scalar d1, real scalar d2, real scalar dir, string scalar color, string scalar clsmat,
 	string scalar sizevar, string scalar sizemat, string scalar label, real scalar edges)
 {
 	real matrix A, Z, ed, pd
@@ -861,6 +861,7 @@ void LsmPlotPrep(string scalar Aname, string scalar Zname, real scalar d1, real 
 	}
 	cg = J(n, 1, 1)
 	if (color != "") cg = st_data(., color)
+	if (clsmat != "") cg = st_matrix(clsmat)[., 1]
 	lb = J(n, 1, "")
 	if (label != "") lb = st_sdata(., label)
 	pd = (Z[., d1], Z[., d2], cg, w)

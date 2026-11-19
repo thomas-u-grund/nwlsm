@@ -4,7 +4,7 @@ d Thomas U. Grund, RWTH Aachen University, www.grund.co.uk
 d email: thomas.u.grund@gmail.com
 d GPL-3. Requires the core package nwcommands.
 d Requires nwcommands (core), version 3.26.0 or later
-d Version: 0.3.0
+d Version: 0.4.0
 d Distribution-Date: 19nov2026
 f nwlsm.ado
 f nwlsm_version.ado
@@ -13,6 +13,9 @@ f nwlsm.sthlp
 f nwlsm_estat.ado
 f nwlsmplot.ado
 f nwlsmplot.sthlp
+f nwlsm.dlg
+f nwlsmplot.dlg
+f nwlsm_estat.dlg
 f lib/lnwlsm.mlib
 f lib/plugins/macos/lsm_sim_macos.plugin
 f lib/plugins/windows/lsm_sim_windows.plugin

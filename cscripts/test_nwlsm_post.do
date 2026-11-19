@@ -56,7 +56,7 @@ mata: st_local("cz", strofreal(correlation((vec(lsmt_pd(st_matrix("e(Z)"))), vec
 assert `cz' > 0.7
 estat mcmcdiag
 matrix DG = r(diag)
-assert rowsof(DG) == 5 & colsof(DG) == 4
+assert rowsof(DG) == 5 & colsof(DG) == 5
 forvalues k = 1/5 {
 	assert DG[`k', 1] >= 1 & DG[`k', 1] <= 300 & abs(DG[`k', 2]) < 10
 }
@@ -166,3 +166,29 @@ void lsmt_series()
 lsmt_series()
 end
 display "PASS test_nwlsm_post: estat positions, mcmcdiag, predict, savedraws, the plot, option checks, ESS and Geweke statistics"
+* chains: Gelman-Rubin statistics and the diagnostics table with several chains; estat clusters and the plot by cluster
+quietly nwlsm g, dim(2) chains(3) nsample(300) burnin(500) seed(4)
+assert e(chains) == 3 & e(nsample) == 300 & e(nsample_chain) == 100
+matrix RH = e(rhat)
+assert rowsof(RH) == 3 & colsof(RH) == 1
+mata: assert(all(st_matrix("RH") :> 0.5) & all(st_matrix("RH") :< 3))
+estat mcmcdiag
+matrix DG = r(diag)
+assert rowsof(DG) == 3 & colsof(DG) == 5 & DG[1, 5] < .
+quietly nwlsm g, dim(2) clusters(2) nsample(300) burnin(500) seed(4)
+estat clusters, nolist
+matrix QQ = r(Q)
+assert rowsof(QQ) == 14 & colsof(QQ) == 2
+clear
+set obs 14
+estat clusters, generate(cl) nolist
+assert cl_class < . & inlist(cl_class, 1, 2)
+nwlsmplot, clusters name(gcl)
+capture nwlsmplot, clusters color(cl_class)
+assert _rc == 198
+quietly nwlsm g, dim(2) nsample(300) burnin(500) seed(4)
+capture estat clusters
+assert _rc == 198
+capture nwlsmplot, clusters
+assert _rc == 198
+display "PASS test_nwlsm_post: chains and clusters post-estimation"
