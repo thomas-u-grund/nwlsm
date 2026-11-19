@@ -350,7 +350,7 @@ end
 capture program drop _nwlsm_gof
 program _nwlsm_gof, rclass
 	version 14
-	syntax [, NSIM(integer 100) SEED(string) GOF(string) PLOT MAXDEG(integer -1) MAXDIST(integer -1) NAME(string) THReads(integer 0)]
+	syntax [, NSIM(integer 100) SEED(string) GOF(string) PLOT MAXDEG(integer -1) MAXDIST(integer -1) NAME(string) THReads(integer 0) CUToff(string)]
 	capture mata: st_numscalar("__nwlsm_Sck", rows(LsmSample("beta")))
 	if _rc {
 		di as error "the posterior draws of the last fit are no longer in memory; fit the model again"
@@ -378,12 +378,29 @@ program _nwlsm_gof, rclass
 	if "`fam'" == "" local fam "bernoulli"
 	local valued = ("`fam'" != "bernoulli")
 	local normal = ("`fam'" == "normal")
+	* cutoff(#): the network of the structure statistics has a tie where the value exceeds # (default 0; for the normal family only if given)
+	local cutv 0
+	local usenet = !`normal'
+	if `"`cutoff'"' != "" {
+		capture confirm number `cutoff'
+		if _rc {
+			di as error "cutoff() must be a number"
+			exit 198
+		}
+		if !`valued' {
+			di as error "cutoff() is for the valued families"
+			exit 198
+		}
+		local cutv = real(`"`cutoff'"')
+		local usenet 1
+	}
 	* statistics: R's  GOF = ~ degree + ... ; default as latentnet (idegree + odegree + distance; degree + distance if undirected), plus the values of a valued network
 	if `"`gof'"' == "" {
-		if `normal' local gof "model values"
+		if `normal' & !`usenet' local gof "model values"
 		else if `dir' local gof "idegree odegree distance"
 		else local gof "degree distance"
-		if `valued' & !`normal' local gof "`gof' values"
+		if `valued' & `usenet' local gof "`gof' values"
+		if `normal' & `usenet' local gof "`gof' model"
 	}
 	local gof = subinstr(subinstr(`"`gof'"', "~", " ", .), "+", " ", .)
 	local allterms "degree idegree odegree espartners dspartners distance model values"
@@ -420,8 +437,8 @@ program _nwlsm_gof, rclass
 			di as error "estat gof: values is for the valued families (family(poisson), family(binomial) or family(normal))."
 			exit 198
 		}
-		if `normal' & !inlist("`found'", "model", "values") {
-			di as error "{p 0 0 2}estat gof: after family(normal) the statistics of the network structure are not defined; use model and values.{p_end}"
+		if `normal' & !`usenet' & !inlist("`found'", "model", "values") {
+			di as error "{p 0 0 2}estat gof: after family(normal) the statistics of the network structure need a threshold for the ties; give {bf:cutoff(}{it:#}{bf:)} (a tie is a value above #), or use model and values.{p_end}"
 			exit 198
 		}
 		local inw : list found in want
@@ -442,7 +459,7 @@ program _nwlsm_gof, rclass
 		local nsim = scalar(__nwlsm_S)
 	}
 	scalar drop __nwlsm_S
-	mata: LsmGof(`nsim', `seed', `mask', `threads', 10, "__lsmgof")
+	mata: LsmGof(`nsim', `seed', `mask', `threads', 10, "__lsmgof", `usenet', `cutv')
 	* print
 	local order "degree idegree odegree espartners dspartners distance model values"
 	local g_degree deg
@@ -515,7 +532,10 @@ program _nwlsm_gof, rclass
 		return matrix gof_`t' = `P'
 	}
 	di as txt "{p 0 0 2}Each simulated network is drawn from the model at one of `nsim' posterior draws (evenly spaced over the stored draws). MC p-value: 2 min(P(simulated <= observed), P(simulated >= observed)), at most 1, as in latentnet. Missing dyads of the observed network count as no tie.{p_end}"
-	if `valued' & !`normal' di as txt "{p 0 0 2}Degree, shared partners and distances are those of the network of the dyads with a positive value.{p_end}"
+	if `valued' & `usenet' {
+		if `cutv' == 0 di as txt "{p 0 0 2}Degree, shared partners and distances are those of the network of the dyads with a positive value.{p_end}"
+		else di as txt "{p 0 0 2}Degree, shared partners and distances are those of the network of the dyads with a value above `cutv'.{p_end}"
+	}
 	if "`plot'" != "" {
 		if "`name'" == "" local name "gof"
 		local panels
@@ -545,6 +565,7 @@ program _nwlsm_gof, rclass
 	}
 	return scalar nsim = `nsim'
 	return scalar seed = `seed'
+	if `valued' & `usenet' return scalar cutoff = `cutv'
 	foreach m in deg ideg odeg esp dsp dist model val {
 		capture matrix drop __lsmgof_`m'
 		capture matrix drop __lsmgof_q_`m'

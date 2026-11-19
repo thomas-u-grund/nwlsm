@@ -151,6 +151,46 @@ foreach pair in idegree:ideg odegree:odeg espartners:esp dspartners:dsp distance
 	di as text "valued network, observed `t': largest difference to the independent computation " `dif'
 	assert `dif' == 0
 }
+* cutoff(): the structure statistics of a threshold network (tie if the value exceeds the cutoff), Poisson with cutoff(1) and normal with cutoff(0.5), against the
+* same independent computation applied to the matrix of the values minus the cutoff
+lsmt_mkvnet net_gau30, y("$REF/gau30_y.csv") dir(1)
+foreach spec in poisson:pois30:1 normal:gau30:0.5 normal:gau30:-0.7 {
+	tokenize "`spec'", parse(":")
+	local fam "`1'"
+	local nmx "`3'"
+	local cut "`5'"
+	if "`fam'" == "poisson" {
+		quietly nwlsm net_pois30, family(poisson) nsample(300) burnin(500) seed(3)
+	}
+	else {
+		quietly nwlsm net_gau30, family(normal) nsample(200) burnin(300) seed(3)
+	}
+	quietly estat gof, nsim(30) seed(1) cutoff(`cut') gof(idegree odegree espartners dspartners distance)
+	assert abs(r(cutoff) - `cut') < 1e-12
+	foreach t in idegree odegree espartners dspartners distance {
+		matrix GC_`t' = r(gof_`t')
+	}
+	preserve
+	import delimited "$REF/`nmx'_y.csv", clear varnames(1)
+	mkmat *, matrix(__Yc0)
+	restore
+	mata: st_matrix("__Yc1", st_matrix("__Yc0") :- `cut')
+	mata: lsmt_obsstats("__Yc1", 1)
+	foreach pair in idegree:ideg odegree:odeg espartners:esp dspartners:dsp distance:dist {
+		gettoken t g : pair, parse(":")
+		local g = substr("`g'", 2, .)
+		matrix G = GC_`t'
+		mata: st_local("dif", strofreal(max(abs(st_matrix("G")[., 1] - st_matrix("O_`g'")))))
+		di as text "`fam' cutoff(`cut'), observed `t': largest difference to the independent computation " `dif'
+		assert `dif' == 0
+	}
+}
+* default statistics with a cutoff after the normal family, cutoff() without a valued family
+quietly estat gof, nsim(20) seed(1) cutoff(0)
+confirm matrix r(gof_model)
+confirm matrix r(gof_values)
+capture estat gof, nsim(20) cutoff(abc)
+assert _rc == 198
 * model statistics: the total value and the covariate sums over the ties
 preserve
 import delimited "$REF/pois30_x.csv", clear varnames(1)
@@ -177,7 +217,6 @@ program lsmt_totval
 	assert abs(G[1, 3] - `sp') < 0.03 * abs(`sp') + 1
 end
 lsmt_mkvnet net_bin30, y("$REF/bin30_y.csv") dir(1)
-lsmt_mkvnet net_gau30, y("$REF/gau30_y.csv") dir(1)
 lsmt_mkvnet net_pois30s, y("$REF/pois30s_y.csv") dir(0)
 lsmt_totval poisson, net(net_pois30) opts(family(poisson)) dir(1)
 lsmt_totval binomial, net(net_bin30) opts(family(binomial) trials(6) sender receiver) dir(1)
@@ -215,6 +254,8 @@ quietly nwlsm net40, nsample(300) burnin(500) seed(3)
 capture estat gof, gof(idegree)
 assert _rc == 198
 capture estat gof, gof(values)
+assert _rc == 198
+capture estat gof, cutoff(0)
 assert _rc == 198
 estat gof, nsim(40) seed(1) plot name(gofplot1)
 graph export "$LSM_SCRATCH/test_gof_plot.png", replace

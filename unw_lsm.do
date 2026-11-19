@@ -96,7 +96,7 @@ real scalar LsmNativeAvailable()
 	return(fileexists(p))
 }
 
-real scalar LSM_PROTOCOL_NEEDED() return(5)
+real scalar LSM_PROTOCOL_NEEDED() return(6)
 
 class LsmNat {
 	real scalar isopen, L
@@ -1031,7 +1031,7 @@ real matrix lsm_gofsum(real rowvector obs, real matrix sim)
 // (bits: 1 degree or in-degree, 2 out-degree, 4 edgewise shared partners, 8 dyadwise shared partners, 16 geodesic distances, 32 model statistics,
 // 64 tie values) for the observed and the simulated networks. Fills the Stata matrices <nm>_<group> (cells x 5: observed, min, mean, max, MC p-value)
 // and <nm>_q_<group> (cells x 6: observed share, min, 25%, median, 75%, max of the share over the simulations).
-void LsmGof(real scalar nsim, real scalar seed, real scalar mask, real scalar threads, real scalar M, string scalar nm)
+void LsmGof(real scalar nsim, real scalar seed, real scalar mask, real scalar threads, real scalar M, string scalar nm, | real scalar usenet, real scalar thr)
 {
 	class LsmNat scalar N
 	real scalar n, nc, K, d, dir, fam, S, na, k, t, RW, m, ncut, j, off, w, g
@@ -1085,7 +1085,11 @@ void LsmGof(real scalar nsim, real scalar seed, real scalar mask, real scalar th
 	if (mod(floor(mask / 32), 2) == 1) w7[6] = 1 + nc
 	if (mod(floor(mask / 64), 2) == 1) w7[7] = (fam == 3 ? ncut + 1 : M + 1)
 	RW = sum(w7)
-	res = N.call(sprintf("20 %f %f %f %f %f %f %f", N.L, nsim, seed, threads, mask, M, ncut), (nsim + 1) * RW)
+	if (args() < 8) {
+		usenet = (fam != 3)
+		thr = 0
+	}
+	res = N.call(sprintf("20 %f %f %f %f %f %f %f %f %s", N.L, nsim, seed, threads, mask, M, ncut, usenet, strofreal(thr, "%20.15g")), (nsim + 1) * RW)
 	N.close()
 	if (hasmissing(res)) {
 		errprintf("nwlsm: the simulation returned missing values\n")
