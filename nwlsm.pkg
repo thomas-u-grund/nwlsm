@@ -1,0 +1,15 @@
+v 3
+d nwlsm. Latent space models for network ties, fitted by MCMC
+d Thomas U. Grund, RWTH Aachen University, www.grund.co.uk
+d email: thomas.u.grund@gmail.com
+d GPL-3. Requires the core package nwcommands.
+d Requires nwcommands (core), version 3.26.0 or later
+d Version: 0.1.0
+d Distribution-Date: 19nov2026
+f nwlsm.ado
+f nwlsm_version.ado
+f nwlsm.sthlp
+f native/lsm_sim.c
+f native/Makefile
+f native/spi/stplugin.c
+f native/spi/stplugin.h
