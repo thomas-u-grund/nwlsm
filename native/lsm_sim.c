@@ -554,7 +554,7 @@ static int mkl_P(const Model *g) { return g->n * g->d + g->K + g->n * (g->act[0]
 /* limited-memory BFGS minimising -f; returns the number of iterations; the final objective (of f) in *fout */
 static int mkl_lbfgs(const Model *g, const double *EY, double *x, int maxit, double *fout) {
 	enum { M = 10 };
-	int P = mkl_P(g), it, i, k, nh = 0, conv = 0, small = 0;
+	int P = mkl_P(g), it, i, k, nh = 0, conv = 0, nsmall = 0;
 	double *gr, *gn, *xn, *dir, *S, *Y, *rho, *al, f, fn;
 	gr = malloc(sizeof(double) * P * 5); gn = gr + P; xn = gn + P; dir = xn + P; al = dir + P;
 	S = malloc(sizeof(double) * P * M * 2); Y = S + (size_t)P * M; rho = malloc(sizeof(double) * M);
@@ -604,9 +604,9 @@ static int mkl_lbfgs(const Model *g, const double *EY, double *x, int maxit, dou
 			for (k = 0; k < P; k++) { S[(size_t)slot * P + k] = xn[k] - x[k]; Y[(size_t)slot * P + k] = gn[k] - gr[k]; sy += S[(size_t)slot * P + k] * Y[(size_t)slot * P + k]; }
 			if (sy > 1e-14) { rho[slot] = 1.0 / sy; nh++; }
 		}
-		if (fabs(f - fn) < 1e-13 * (1.0 + fabs(f))) small++; else small = 0;
+		if (fabs(f - fn) < 1e-13 * (1.0 + fabs(f))) nsmall++; else nsmall = 0;
 		memcpy(x, xn, sizeof(double) * P); memcpy(gr, gn, sizeof(double) * P); f = fn;
-		if (small >= 5) { conv = 1; it++; break; }
+		if (nsmall >= 5) { conv = 1; it++; break; }
 	}
 	(void)conv;
 	*fout = -f;
@@ -709,9 +709,9 @@ static void clu_init(const Model *g, const double *Z, Clu *c) {
 	double *cnt = calloc(G, sizeof(double)), *mind = malloc(sizeof(double) * n);
 	for (i = 0; i < n; i++) mind[i] = 1e300;
 	for (k = 0; k < G; k++) {
-		int far = first;
-		if (k > 0) { double best = -1; for (i = 0; i < n; i++) if (mind[i] > best) { best = mind[i]; far = i; } }
-		for (j = 0; j < d; j++) c->mu[k * d + j] = Z[far * d + j];
+		int farj = first;
+		if (k > 0) { double best = -1; for (i = 0; i < n; i++) if (mind[i] > best) { best = mind[i]; farj = i; } }
+		for (j = 0; j < d; j++) c->mu[k * d + j] = Z[farj * d + j];
 		for (i = 0; i < n; i++) { double s = 0; for (j = 0; j < d; j++) { double t = Z[i * d + j] - c->mu[k * d + j]; s += t * t; } if (s < mind[i]) mind[i] = s; }
 	}
 	for (it = 0; it < 30; it++) {
