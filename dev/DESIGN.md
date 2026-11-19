@@ -2,6 +2,9 @@
 
 Owner: Thomas U. Grund (sole author). GPL-3. Part of the nwcommands family; depends only on the core. Native C plugin only (no Mata fallback).
 
+## Status (2026-11-19)
+Stage 1 and the sender/receiver/sociality and bilinear parts of stage 2 are implemented (0.3.0); clusters and valued networks are open.
+
 ## Scope in stages
 1. **Base model (latentnet "euclidean")**: binary one-mode networks (undirected and directed), logit P(y_ij = 1) = beta0 + sum_k beta_k x_ijk - |z_i - z_j|, z_i in R^d. Posterior by MCMC (random-walk Metropolis-Hastings on beta and z; Gibbs for the latent-position variance). Output: posterior means and intervals of beta, posterior sample, positions after Procrustes alignment, and the minimum-Kullback-Leibler (MKL) positions, as latentnet. Edge covariates from nwcommands networks.
 2. Extensions that latentnet offers, in order of value: sender/receiver random effects (`sender`, `receiver`, `rsociality`), bilinear distance (`bilinear`), latent clusters (`G=`), valued networks (Poisson, ordinal). Each only after the previous one reproduces latentnet.
@@ -21,3 +24,11 @@ Compare: posterior means of beta, the posterior mean of the log likelihood, the 
 
 ## Conventions to follow (from the core RELEASING.md / nwalaam)
 Version tooling (tools/set_version.py, check_version.py), VERSION file with the date, CHANGELOG entry per version, native/Makefile plus the workflow in .github/workflows (Linux and Windows plugins are built by CI on a push touching native/), plugin protocol number checked by the .ado (never shown to users), tests in cscripts/ run with the scratch-PLUS pattern of CLAUDE.md, user-facing text never cites internal files. No push, tag or release without the owner's go.
+
+## Timing (2026-11-19, macOS, Stata 17 BE vs R 4.x latentnet 2.12.0, default settings: 10,000 burn-in, 4,000 draws, interval 10; directed network, d = 2, sender and receiver effects, MKL included)
+| n | latentnet | nwlsm |
+|---|---|---|
+| 50 | 7.1 s | 4.4 s |
+| 100 | 31.4 s | 19.0 s |
+| 200 | 117.8 s | 76.8 s |
+The run is bound by exp/log1p per dyad (about 7.7 ns per evaluation, 1e10 evaluations at n = 200); -O3 -fno-math-errno did not help. The n updates of the sender effects (and then of the receiver effects) are conditionally independent and could run in threads.
