@@ -8,4 +8,3 @@ The master release procedure for all packages of the family is `RELEASING.md` of
 - Build the plugin: `cd native && make macos` (macOS), `make unix` (Linux); Windows by `cl /LD /O2 /DSYSTEM=STWIN32 /I spi lsm_sim.c spi\stplugin.c /Fe:..\lib\plugins\windows\lsm_sim_windows.plugin`. After the first push the workflow `.github/workflows/build-plugins.yml` builds all three and commits the binaries.
 - Tests: `NWCORE=<core checkout> cscripts/run_tests.sh`. The slow tests are `test_nwlsm_exact.do` (about 80 s) and `test_nwlsm_karate.do` (about 2 minutes). The fixtures of `test_nwlsm_changestats.do` are made by `dev/gen_ref_definitions.py`.
 - Integration into the core (`nwinstall`, `nwversion`, website) is a core release and is not part of this repository.
-- Not yet verified on Linux or Windows.

@@ -1,4 +1,4 @@
-/* nwlsm_estat.dlg - dialog of estat after nwlsm: positions, mcmcdiag, clusters, predict, gof, ppcheck, influence. */
+/* nwlsm_estat.dlg - dialog of estat after nwlsm: positions, mcmcdiag, clusters, predict, gof, ppcheck, bic, influence. */
 VERSION 14.0
 INCLUDE _std_small
 SYNCHRONOUS_ONLY
@@ -18,38 +18,59 @@ BEGIN
   RADIO rb_pre 20 102 520 ., label("predict - posterior mean tie probabilities") middle onclickon(script pre_on)
   RADIO rb_gof 20 124 520 ., label("gof - goodness of fit: networks simulated from the posterior") middle onclickon(script gof_on)
   RADIO rb_ppc 20 146 520 ., label("ppcheck - posterior predictive check of the tie probabilities") middle onclickon(script ppc_on)
-  RADIO rb_inf 20 168 520 ., label("influence - influence effect, predicted outcomes, actors exerting influence") last onclickon(script inf_on)
-  GROUPBOX gb_opt 10 198 540 392, label("Options")
-  CHECKBOX cx_mean 20 220 500 ., label("mean: mean of the aligned draws instead of the MKL positions (positions)")
-  TEXT tx_gen 20 248 200 ., label("generate() (stub or network name):")
-  EDIT ed_gen 230 248 160 ., nomem
-  CHECKBOX cx_rep 20 274 500 ., label("replace an existing network (predict)")
-  CHECKBOX cx_nol 20 300 500 ., label("nolist: do not list the table")
-  CHECKBOX cx_gr 20 326 500 ., label("graph: trace plots of the draws (mcmcdiag) or calibration plot (ppcheck)")
-  TEXT tx_nsim 20 356 200 ., label("Simulated networks (gof):")
-  SPINNER sp_nsim 230 356 90 ., default(100) min(2) max(100000) nomem
-  TEXT tx_gseed 340 356 90 ., label("Seed:")
-  EDIT ed_gseed 430 356 100 ., nomem
-  TEXT tx_gterms 20 384 200 ., label("Statistics (gof), blank = default:")
-  EDIT ed_gterms 230 384 300 ., nomem
-  TEXT tx_gnote 20 410 510 ., label("degree idegree odegree espartners dspartners distance model values")
-  CHECKBOX cx_gplot 20 436 500 ., label("plot: box plots of the simulated statistics (gof)")
-  TEXT tx_grp 20 464 200 ., label("Groups (ppcheck):")
-  SPINNER sp_grp 230 464 90 ., default(10) min(2) max(50) nomem
-  TEXT tx_thr 340 464 90 ., label("Threads (gof):")
-  SPINNER sp_thr 430 464 90 ., default(0) min(0) max(256) nomem
-  TEXT tx_top 20 490 200 ., label("Actors listed (influence):")
-  SPINNER sp_top 230 490 90 ., default(10) min(0) max(1000) nomem
-  TEXT tx_prd 20 516 200 ., label("predict() (new variable):")
-  EDIT ed_prd 230 516 160 ., nomem
-  TEXT tx_exp 20 542 200 ., label("exposure() (new variable):")
-  EDIT ed_exp 230 542 160 ., nomem
-  TEXT tx_exr 20 568 200 ., label("exerted() (new variable):")
-  EDIT ed_exr 230 568 160 ., nomem
+  RADIO rb_inf 20 168 520 ., label("influence - influence effect, predicted outcomes, actors exerting influence") middle onclickon(script inf_on)
+  RADIO rb_bic 20 190 520 ., label("bic - BIC as latentnet (binary networks)") last onclickon(script bic_on)
+  GROUPBOX gb_opt 10 220 540 392, label("Options")
+  CHECKBOX cx_mean 20 242 500 ., label("mean: mean of the aligned draws instead of the MKL positions (positions)")
+  TEXT tx_gen 20 270 200 ., label("generate() (stub or network name):")
+  EDIT ed_gen 230 270 160 ., nomem
+  CHECKBOX cx_rep 20 296 500 ., label("replace an existing network (predict)")
+  CHECKBOX cx_nol 20 322 500 ., label("nolist: do not list the table")
+  CHECKBOX cx_gr 20 348 500 ., label("graph: trace plots of the draws (mcmcdiag) or calibration plot (ppcheck)")
+  TEXT tx_nsim 20 378 200 ., label("Simulated networks (gof):")
+  SPINNER sp_nsim 230 378 90 ., default(100) min(2) max(100000) nomem
+  TEXT tx_gseed 340 378 90 ., label("Seed:")
+  EDIT ed_gseed 430 378 100 ., nomem
+  TEXT tx_gterms 20 406 200 ., label("Statistics (gof), blank = default:")
+  EDIT ed_gterms 230 406 300 ., nomem
+  TEXT tx_gnote 20 432 510 ., label("degree idegree odegree espartners dspartners distance model values")
+  CHECKBOX cx_gplot 20 458 250 ., label("plot: box plots (gof)")
+  TEXT tx_grp 20 486 200 ., label("Groups (ppcheck):")
+  SPINNER sp_grp 230 486 90 ., default(10) min(2) max(50) nomem
+  TEXT tx_thr 340 486 90 ., label("Threads (gof):")
+  SPINNER sp_thr 430 486 90 ., default(0) min(0) max(256) nomem
+  TEXT tx_top 20 512 200 ., label("Actors listed (influence):")
+  SPINNER sp_top 230 512 90 ., default(10) min(0) max(1000) nomem
+  TEXT tx_prd 20 538 200 ., label("predict() (new variable):")
+  EDIT ed_prd 230 538 160 ., nomem
+  TEXT tx_exp 20 564 200 ., label("exposure() (new variable):")
+  EDIT ed_exp 230 564 160 ., nomem
+  TEXT tx_exr 20 590 200 ., label("exerted() (new variable):")
+  EDIT ed_exr 230 590 160 ., nomem
+  TEXT tx_cut 290 458 60 ., label("cutoff():")
+  EDIT ed_cut 350 458 80 ., nomem
+  TEXT tx_eff 340 512 130 ., label("effobs(), bic:")
+  COMBOBOX cb_eff 470 512 70 ., dropdownlist contents(eff_list) values(eff_vals) nomem
+END
+
+LIST eff_list
+BEGIN
+	ties
+	dyads
+	actors
+END
+
+LIST eff_vals
+BEGIN
+	ties
+	dyads
+	actors
 END
 
 SCRIPT pos_on
 BEGIN
+	main.ed_cut.disable
+	main.cb_eff.disable
 	main.sp_top.disable
 	main.ed_prd.disable
 	main.ed_exp.disable
@@ -69,6 +90,8 @@ END
 
 SCRIPT dia_on
 BEGIN
+	main.ed_cut.disable
+	main.cb_eff.disable
 	main.sp_top.disable
 	main.ed_prd.disable
 	main.ed_exp.disable
@@ -88,6 +111,8 @@ END
 
 SCRIPT clu_on
 BEGIN
+	main.ed_cut.disable
+	main.cb_eff.disable
 	main.sp_top.disable
 	main.ed_prd.disable
 	main.ed_exp.disable
@@ -107,6 +132,8 @@ END
 
 SCRIPT pre_on
 BEGIN
+	main.ed_cut.disable
+	main.cb_eff.disable
 	main.sp_top.disable
 	main.ed_prd.disable
 	main.ed_exp.disable
@@ -126,6 +153,8 @@ END
 
 SCRIPT gof_on
 BEGIN
+	main.ed_cut.enable
+	main.cb_eff.disable
 	main.sp_top.disable
 	main.ed_prd.disable
 	main.ed_exp.disable
@@ -145,6 +174,8 @@ END
 
 SCRIPT ppc_on
 BEGIN
+	main.ed_cut.disable
+	main.cb_eff.disable
 	main.sp_top.disable
 	main.ed_prd.disable
 	main.ed_exp.disable
@@ -164,6 +195,8 @@ END
 
 SCRIPT inf_on
 BEGIN
+	main.ed_cut.disable
+	main.cb_eff.disable
 	main.cx_mean.disable
 	main.ed_gen.disable
 	main.cx_rep.disable
@@ -179,6 +212,27 @@ BEGIN
 	main.ed_prd.enable
 	main.ed_exp.enable
 	main.ed_exr.enable
+END
+
+SCRIPT bic_on
+BEGIN
+	main.sp_top.disable
+	main.ed_prd.disable
+	main.ed_exp.disable
+	main.ed_exr.disable
+	main.cx_mean.disable
+	main.ed_gen.disable
+	main.cx_rep.disable
+	main.cx_nol.enable
+	main.cx_gr.disable
+	main.sp_nsim.disable
+	main.ed_gseed.disable
+	main.ed_gterms.disable
+	main.cx_gplot.disable
+	main.sp_grp.disable
+	main.sp_thr.disable
+	main.ed_cut.disable
+	main.cb_eff.enable
 END
 
 PROGRAM command
@@ -207,6 +261,9 @@ BEGIN
 	if main.rb_inf {
 		put "estat influence"
 	}
+	if main.rb_bic {
+		put "estat bic"
+	}
 	put ","
 	if main.cx_mean & main.rb_pos {
 		put " mean"
@@ -217,7 +274,7 @@ BEGIN
 	if main.cx_rep & main.rb_pre {
 		put " replace"
 	}
-	if main.cx_nol & (main.rb_pos | main.rb_dia | main.rb_clu | main.rb_ppc | main.rb_inf) {
+	if main.cx_nol & (main.rb_pos | main.rb_dia | main.rb_clu | main.rb_ppc | main.rb_inf | main.rb_bic) {
 		put " nolist"
 	}
 	if main.cx_gr & (main.rb_dia | main.rb_ppc | main.rb_inf) {
@@ -239,6 +296,12 @@ BEGIN
 		if !main.sp_thr.isdefault() {
 			put " threads(" main.sp_thr ")"
 		}
+		if main.ed_cut.isneq("") {
+			put " cutoff(" main.ed_cut ")"
+		}
+	}
+	if main.rb_bic & main.cb_eff.isneq("ties") & main.cb_eff.isneq("") {
+		put " effobs(" main.cb_eff ")"
 	}
 	if main.rb_inf {
 		if !main.sp_top.isdefault() {

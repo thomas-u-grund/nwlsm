@@ -2,7 +2,7 @@
 
 Owner: Thomas U. Grund (sole author). GPL-3. Part of the nwcommands family; depends only on the core. Native C plugin only (no Mata fallback).
 
-## Status (2026-11-19, version 0.6.0: stage 3, the social influence model, done)
+## Status (2026-11-19, version 0.7.0: stage 3, the social influence model, done; BIC and cluster selection, gof cutoff, worker team)
 Stage 1, the sender/receiver/sociality and bilinear parts and the latent clusters of stage 2 are implemented (0.4.0, with chains and threads); valued networks (Poisson, binomial, normal), `estat gof`, `estat ppcheck` and trace plots are implemented (0.5.0). Stage 3 (the latent space model for social influence) is implemented in 0.6.0 (see below).
 
 ## Scope in stages
@@ -35,3 +35,10 @@ Version tooling (tools/set_version.py, check_version.py), VERSION file with the 
 | 100 | 31.4 s | 19.0 s |
 | 200 | 117.8 s | 76.8 s |
 The run is bound by exp/log1p per dyad (about 7.7 ns per evaluation, 1e10 evaluations at n = 200); -O3 -fno-math-errno did not help. The n updates of the sender effects (and then of the receiver effects) are conditionally independent and could run in threads.
+
+## Open items of 0.7.0 (2026-11-19)
+- BIC (`estat bic`, `nwlsmselect`): latentnet's `bic.ergmm`: Y part -2 lpY(beta_mle | Z_mkl, effects_mkl) + p log(eff.obs) with find.mle over the coefficients only (Newton in Mata, post-estimation, binary family); Z part: without clusters -2 sum dnorm(Z, 0, sqrt(mean(Z^2) d)) + log(n d); with G clusters -2 llk(mbc.VII.EM on the MKL positions) + (G - 1 + d G + G) log n, the EM of ours: best of 15 k-means starts (Lloyd), 200 EM iterations, tolerance sqrt(eps), restart on a failed fit, Gused < G if no fit works (latentnet's warning). Effects parts -2 sum dnorm(e, 0, sd) + log n. Reference results `dev/ref/bic*` by `dev/ref_latentnet_bic.R`.
+- Comparison with latentnet: R's k-means (Hartigan-Wong) and ours (Lloyd) can reach different mixture local maxima; for weakly identified sender/receiver effects the MKL optimisers of the two packages end at different points of a flat valley (sender 7.5 / receiver 40.0 in R against 37.5 / 44.6 here on Sampson).
+- gof `cutoff()`: tie = value above the cutoff in the observed and the simulated networks; plugin arguments usenet and thr appended to code 20.
+- Worker team: `Pool` (persistent threads, mutex and condition variables; pthreads, Windows CRITICAL_SECTION and CONDITION_VARIABLE), created per chain when inner threads > 1 and for one MKL start; items dealt out k mod T, block sums added in block order, so the result is independent of the team size. Inner threads per chain now up to n^2 / 1500 (before n^2 / 10000). Gain is limited because the position updates are sequential: n = 100, 4 threads 2.1 s against 2.5 s.
+- Hierarchical influence model and susceptibility indicator not implemented (see TODO.md for the reasons).

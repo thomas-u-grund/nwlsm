@@ -1,4 +1,4 @@
-*! version 0.6.0  19nov2026 nwlsm
+*! version 0.7.0  19nov2026 nwlsm
 * Copyright (C) 2026 Thomas U. Grund
 * This file is part of nwlsm, a Stata package for latent space models for networks. It follows the latent space model of
 * Hoff, Raftery and Handcock (2002) as implemented in the R package latentnet (Krivitsky and Handcock) and is written independently.
@@ -383,7 +383,7 @@ program nwlsm, eclass
 	matrix colnames `VT' = mean sd mcse lower95 upper95
 	ereturn post `B' `V', obs(`__ny')
 	ereturn local cmd "nwlsm"
-	ereturn local version "0.6.0"
+	ereturn local version "0.7.0"
 	ereturn local estat_cmd "nwlsm_estat"
 	ereturn local title "`=cond(`__io', "Latent space model for social influence", "Latent space model")' (`=cond("`bilinear'" != "", "bilinear", "Euclidean distance")'; `__famname' family), posterior by MCMC"
 	ereturn local latent = cond("`bilinear'" != "", "bilinear", "euclidean")

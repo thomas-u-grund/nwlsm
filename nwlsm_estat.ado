@@ -1,4 +1,4 @@
-*! version 0.6.0  19nov2026 nwlsm_estat
+*! version 0.7.0  19nov2026 nwlsm_estat
 * Copyright (C) 2026 Thomas U. Grund. Part of nwlsm; GNU GPL-3 (see LICENSE).
 
 capture program drop nwlsm_estat
@@ -837,7 +837,7 @@ program _nwlsm_bic, rclass
 	local ob = `R'[1, 6]
 	if "`nolist'" == "" {
 		di
-		di as text "BIC of the latent position model (as latentnet's bic.ergmm, at the minimum Kullback-Leibler estimates)"
+		di as text "BIC of the latent position model (as latentnet's bic.ergmm)"
 		di as text "{hline 44}"
 		di as text %-24s "Component" %20s "BIC"
 		di as text "{hline 44}"

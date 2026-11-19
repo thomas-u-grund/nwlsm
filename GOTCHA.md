@@ -48,3 +48,8 @@ The chain's labels switch freely in a cluster model. `lsm_relabel()` permutes th
 - `state_alloc()` is called on a zeroed `State` everywhere (`memset`), including in `stata_call()`; the influence arrays are only allocated with the influence model and freed by `state_free()`.
 - Dialog `.dlg` `if` conditions must not use parentheses; the macOS dialog assembly harness is used to check the generated commands.
 - `LsmCheckInfl()` (Mata) and plugin codes 5 and 6 exist only for the tests.
+
+## BIC (0.7.0)
+- `estat bic` needs the Mata externals of the last fit (like `estat gof`) and `e(mkl_effects)` (only stored when the actor matrices fit into a Stata matrix). `__nwlsm_MZ` holds the MKL positions after centring and rotation; the BIC of the positions without clusters depends on the centring, so keep `lsm_ztrans`.
+- The mixture EM is seeded internally (`rseed`, state restored) so it does not change the user's random numbers.
+- The worker team must not be used by two callers at once; the chains use one team each, the MKL fit one team (single start only).
