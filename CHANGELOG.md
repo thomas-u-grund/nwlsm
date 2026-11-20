@@ -4,7 +4,7 @@
 - Dialogs: `nwlsm_estat.dlg` has a field for the graph name (`name()`) of the graphs of `estat mcmcdiag`, `gof`, `ppcheck` and `influence`; `nwlsmselect.dlg` has a field for the graph options (`gopts()`).
 - The dialog test `tools/dlg_assembly_test.py` checks the command that `nwlsmplot.dlg`, `nwlsm_estat.dlg` and `nwlsmselect.dlg` build; `cscripts/test_dlg_plots.do` runs the command lines of the graph options.
 
-Tested on macOS with Stata 17 BE: dialog assembly test, plot tests and error-path tests. Other Stata versions and operating systems: not tested yet.
+Tested on macOS with Stata 17 BE, on Linux (Ubuntu 22.04) and on Windows 11 (both StataNow 19.5 MP): dialog assembly test, `test_dlg_plots`, `test_nwlsm_plots` and `test_nwlsm_errors`. Stata 18 on the Mac: not run.
 
 ## [1.0.0] - 2026-11-20
 - `nwlsmplot`: `color()` accepts a string variable (groups in alphabetical order, the strings in the legend); a `title()` or `subtitle()` you give is black like the default unless it carries its own `color()`; `noarrows` is recognised only as an option word (a file name such as `export(x_noarrows.png)` or a title text containing "noarrows" is left alone). Tests in `cscripts/test_nwlsm_plots.do`.
