@@ -4,7 +4,7 @@ capture program drop nwinstall
 local core : env NWCORE
 if "`core'" == "" local core "/Users/tgrund/FILES_NEW/SOFTWARE/nwcommands"
 local scratch : env NWLSM_SCRATCH
-if "`scratch'" == "" local scratch "`c(tmpdir)'/nwlsm_tests"
+if "`scratch'" == "" local scratch = subinstr("`c(tmpdir)'", "\", "/", .) + "/nwlsm_tests"
 local tag : env NWLSM_TAG
 tempfile __f
 local plus "`scratch'/plus_`tag'_`=floor(runiform()*1e9)'"

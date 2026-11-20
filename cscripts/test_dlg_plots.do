@@ -1,7 +1,7 @@
 * The command lines that the dialogs of nwlsmplot, nwlsmselect and estat (nwlsm_estat) build for the graph options run, the graph exists.
 * (The assembly of the command string is tested by tools/dlg_assembly_test.py; here the strings are run.)  Run from the repository root.
 do cscripts/nwlsm_testlib.do
-set graphics off
+* (graphics stay on: Stata on Windows cannot export a graph in batch mode with graphics off, r(693))
 set linesize 255
 capture program drop lsmt_gexists
 program lsmt_gexists
