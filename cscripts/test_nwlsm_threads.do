@@ -69,7 +69,8 @@ foreach th in 1 2 4 8 {
 	if scalar(ref) == . scalar ref = scalar(h)
 	assert scalar(h) == scalar(ref)
 }
-assert abs(scalar(ref) - 3710932.303690526) < 1e-6
+* relative tolerance: the summation order differs a little between platforms (Linux differs by 4e-10)
+assert abs(scalar(ref) - 3710932.303690526) < 1e-8 * 3710932.303690526
 di as result "PASS pool100"
 * errors
 capture nwlsm big, threads(-1)
