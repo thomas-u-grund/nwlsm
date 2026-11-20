@@ -288,8 +288,16 @@ program nwlsmplot, rclass
 	local mopt
 	if `"`msize'"' == "" local msize "medium"
 	if `"`labsize'"' == "" local labsize "vsmall"
-	if `"`labposition'"' == "" local labposition "1"
-	if `"`label'"' != "" local mopt `"mlabel(lb) mlabsize(`labsize') mlabposition(`labposition')"'
+	if `"`labposition'"' == "" local labposition "auto"
+	local autolab 0
+	if `"`label'"' != "" {
+		if `"`labposition'"' == "auto" {
+			if `n' <= 150 local autolab 1
+			else local labposition "1"
+		}
+		if `autolab' local mopt `"mlabel(lb) mlabsize(`labsize') mlabvposition(lp)"'
+		else local mopt `"mlabel(lb) mlabsize(`labsize') mlabposition(`labposition')"'
+	}
 	local wt
 	if "`sizevar'`sizeeff'" != "" local wt "[aweight = w]"
 	else local mopt `"`mopt' msize(`msize')"'
@@ -382,6 +390,69 @@ program nwlsmplot, rclass
 		if "`xl'" != "" & "`yl'" != "" & "`noaxes'" == "" local axopt `"xtitle("dimension `d1'") ytitle("dimension `d2'") xlabel(`xl', grid) ylabel(`yl', grid)"'
 	}
 	if strpos(`"`options'"', "aspectratio(") | strpos(`"`options'"', "aspect(") local aspopt
+	* automatic label positions: for every actor the clock position (around the marker) with the fewest other markers and already placed labels under its label
+	if `autolab' {
+		quietly {
+			summarize x in 1/`n', meanonly
+			local axlo = r(min)
+			local axhi = r(max)
+			summarize y in 1/`n', meanonly
+			local aylo = r(min)
+			local ayhi = r(max)
+			if "`noequal'" == "" {
+				local axlo = min(`axlo', `xlo')
+				local axhi = max(`axhi', `xhi')
+				local aylo = min(`aylo', `ylo')
+				local ayhi = max(`ayhi', `yhi')
+			}
+			else {
+				local pd = 0.06 * max(`axhi' - `axlo', `ayhi' - `aylo', 1e-6)
+				local axlo = `axlo' - `pd'
+				local axhi = `axhi' + `pd'
+				local aylo = `aylo' - `pd'
+				local ayhi = `ayhi' + `pd'
+			}
+			local lfac = cond("`labsize'" == "vsmall", 1, cond("`labsize'" == "small", 1.3, cond("`labsize'" == "medsmall", 1.6, cond("`labsize'" == "medium", 2, 1.2))))
+			generate double __nx = (x - `axlo') / (`axhi' - `axlo') in 1/`n'
+			generate double __ny = (y - `aylo') / (`ayhi' - `aylo') in 1/`n'
+			generate double __lw = (0.0125 * max(1, strlen(lb)) * `lfac') in 1/`n'
+			local lh = 0.042 * `lfac'
+			generate double __bx = . 
+			generate double __by = . 
+			generate double __bw = . 
+			generate byte lp = 3 in 1/`n'
+			local cpos "3 9 12 6 1 11 5 7"
+			local csx "1 -1 0 0 1 -1 1 -1"
+			local csy "0 0 1 -1 1 1 -1 -1"
+			forvalues i = 1/`n' {
+				local xi = __nx[`i']
+				local yi = __ny[`i']
+				local wi = __lw[`i']
+				local best = 1e9
+				forvalues c = 1/8 {
+					local sx : word `c' of `csx'
+					local sy : word `c' of `csy'
+					local bxc = `xi' + `sx' * (`wi' / 2 + 0.008)
+					local byc = `yi' + `sy' * (`lh' / 2 + 0.008)
+					count if abs(__nx - `bxc') < `wi' / 2 + 0.004 & abs(__ny - `byc') < `lh' / 2 + 0.004 & _n != `i' & _n <= `n'
+					local pen = 2 * r(N) + 0.01 * `c'
+					count if abs(__bx - `bxc') < (`wi' + __bw) / 2 & abs(__by - `byc') < `lh'
+					local pen = `pen' + 3 * r(N)
+					if `bxc' - `wi' / 2 < 0 | `bxc' + `wi' / 2 > 1 | `byc' - `lh' / 2 < 0 | `byc' + `lh' / 2 > 1 local pen = `pen' + 1
+					if `pen' < `best' {
+						local best = `pen'
+						local bp : word `c' of `cpos'
+						local bbx = `bxc'
+						local bby = `byc'
+					}
+				}
+				replace lp = `bp' in `i'
+				replace __bx = `bbx' in `i'
+				replace __by = `bby' in `i'
+				replace __bw = `wi' in `i'
+			}
+		}
+	}
 	twoway `plots', `axopt' `ttl' `aspopt' `legend' ///
 		`=cond("`name'" != "", "name(`name', replace)", "")' `options'
 	if `"`export'"' != "" {

@@ -120,6 +120,10 @@ quietly set obs 18
 quietly gen str6 nm = "m" + string(_n)
 nwlsmplot, clusters circles arrows label(nm) labsize(tiny) name(d6)
 lsmt_gexists d6
+nwlsmplot, clusters label(nm) labposition(auto) noequal name(d6b)
+lsmt_gexists d6b
+nwlsmplot, clusters label(nm) labposition(3) name(d6c)
+lsmt_gexists d6c
 * undirected network: arrows are refused
 quietly nwlsm und, dim(2) seed(3) nsample(300) burnin(300)
 capture nwlsmplot, arrows

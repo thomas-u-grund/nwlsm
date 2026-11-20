@@ -21,7 +21,7 @@
 {synopt :{opt size(spec)}}size the actors by {cmd:sender}, {cmd:receiver} or {cmd:sociality} (posterior mean effects of the fit), by {cmd:influence} (the influence each actor exerts, after the influence model) or by a numeric variable{p_end}
 {synopt :{opt label(varname)}}label the actors with a string variable{p_end}
 {synopt :{opt labs:ize(string)}}size of the labels; default {cmd:vsmall}{p_end}
-{synopt :{opt labp:osition(string)}}position of the labels as a clock position (0 to 12); default {cmd:1}{p_end}
+{synopt :{opt labp:osition(string)}}position of the labels as a clock position (0 to 12), or {cmd:auto}; default {cmd:auto}{p_end}
 {synopt :{opt noedges}}do not draw the ties{p_end}
 {synopt :{opt arr:ows}}draw the ties of a directed network as arrows from sender to receiver (the default for directed networks){p_end}
 {synopt :{opt noarr:ows}}draw the ties of a directed network as lines without arrow heads{p_end}
