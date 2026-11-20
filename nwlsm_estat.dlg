@@ -7,7 +7,7 @@ OK ok1, label("OK")
 CANCEL can1, label("Cancel")
 SUBMIT sub1, label("Submit")
 RESET res1
-POSITION 10 10 560 640
+POSITION 10 10 560 668
 
 DIALOG main, title("estat - Postestimation after nwlsm")
 BEGIN
@@ -20,7 +20,7 @@ BEGIN
   RADIO rb_ppc 20 146 520 ., label("ppcheck - posterior predictive check of the tie probabilities") middle onclickon(script ppc_on)
   RADIO rb_inf 20 168 520 ., label("influence - influence effect, predicted outcomes, actors exerting influence") middle onclickon(script inf_on)
   RADIO rb_bic 20 190 520 ., label("bic - BIC as latentnet (binary networks)") last onclickon(script bic_on)
-  GROUPBOX gb_opt 10 220 540 392, label("Options")
+  GROUPBOX gb_opt 10 220 540 420, label("Options")
   CHECKBOX cx_mean 20 242 500 ., label("mean: mean of the aligned draws instead of the MKL positions (positions)")
   TEXT tx_gen 20 270 200 ., label("generate() (stub or network name):")
   EDIT ed_gen 230 270 160 ., nomem
@@ -47,6 +47,8 @@ BEGIN
   EDIT ed_exp 230 564 160 ., nomem
   TEXT tx_exr 20 590 200 ., label("exerted() (new variable):")
   EDIT ed_exr 230 590 160 ., nomem
+  TEXT tx_gnm 20 616 200 ., label("Graph name (graph, plot):")
+  EDIT ed_gnm 230 616 160 ., nomem
   TEXT tx_cut 290 458 60 ., label("cutoff():")
   EDIT ed_cut 350 458 80 ., nomem
   TEXT tx_eff 340 512 130 ., label("effobs(), bic:")
@@ -316,6 +318,9 @@ BEGIN
 		if main.ed_exr.isneq("") {
 			put " exerted(" main.ed_exr ")"
 		}
+	}
+	if main.ed_gnm.isneq("") & ((main.cx_gr & (main.rb_dia | main.rb_ppc | main.rb_inf)) | (main.cx_gplot & main.rb_gof)) {
+		put " name(" main.ed_gnm ")"
 	}
 	if main.rb_ppc & !main.sp_grp.isdefault() {
 		put " groups(" main.sp_grp ")"
