@@ -4,7 +4,7 @@
 capture program drop nwlsmselect
 program nwlsmselect, rclass
 	version 14
-	syntax anything(name=netname) [, CLUsters(numlist integer >=0 <=6) EFFobs(string) REFit NOList *]
+	syntax anything(name=netname) [, CLUsters(numlist integer >=0 <=6) EFFobs(string) REFit NOList GRAPH GNAME(string) GOPts(string asis) *]
 	_nwlsm_libcheck
 	if "`clusters'" == "" local clusters "0 2 3 4"
 	local clusters : list uniq clusters
@@ -70,6 +70,41 @@ program nwlsmselect, rclass
 		}
 		di as text "{hline 72}"
 		di as text "{p 0 0 2}Sorted by BIC, smaller is better; 0 clusters is the model without clusters. The BIC compares fits to the same network with the same options.{p_end}"
+	}
+	if "`gname'" != "" | `"`gopts'"' != "" {
+		if "`graph'" == "" {
+			di as error "gname() and gopts() need the option graph"
+			exit 198
+		}
+	}
+	if "`graph'" != "" {
+		* BIC and its parts against the number of clusters (0 = no clusters)
+		preserve
+		quietly {
+			clear
+			svmat double `T', names(col)
+			sort clusters
+			summarize BIC_effects, meanonly
+			local haseff = (r(max) != 0 | r(min) != 0)
+			local xl
+			forvalues i = 1/`nm' {
+				local v = clusters[`i']
+				local xl `"`xl' `v'"'
+			}
+			if clusters[1] == 0 local xl : subinstr local xl " 0" `" 0 "none""', count(local junk)
+		}
+		local pl `"(connected BIC clusters, lcolor(black) mcolor(black) msymbol(O) lwidth(medthick)) (connected BIC_Y clusters, lcolor(navy) mcolor(navy) msymbol(D) lpattern(dash)) (connected BIC_Z clusters, lcolor(maroon) mcolor(maroon) msymbol(T) lpattern(dash))"'
+		local lg `"1 "BIC" 2 "BIC of the ties (Y)" 3 "BIC of the positions (Z)""'
+		if `haseff' {
+			local pl `"`pl' (connected BIC_effects clusters, lcolor(forest_green) mcolor(forest_green) msymbol(S) lpattern(dash))"'
+			local lg `"`lg' 4 "BIC of the random effects""'
+		}
+		local gtt `"title("BIC by number of latent clusters")"'
+		if strpos(`"`gopts'"', "title(") local gtt
+		twoway `pl', xlabel(`xl') xtitle("Number of clusters (none = no clusters)") ytitle("BIC") xline(`bestG', lpattern(shortdash) lcolor(gs10)) ///
+			legend(order(`lg') position(6) rows(2) size(small)) `gtt' note("Dashed vertical line: smallest BIC (`bestG' clusters). Smaller is better.", size(vsmall)) ///
+			`=cond("`gname'" != "", "name(`gname', replace)", "")' `gopts'
+		restore
 	}
 	if "`refit'" != "" {
 		if `bestG' == 0 quietly nwlsm `netname', `options'

@@ -9,7 +9,7 @@
 {title:Syntax}
 
 {p 8 16 2}
-{cmd:nwlsmselect} {it:netname} [{cmd:,} {opt clu:sters(numlist)} {opt eff:obs(string)} {opt ref:it} {opt nol:ist} {it:nwlsm_options}]
+{cmd:nwlsmselect} {it:netname} [{cmd:,} {opt clu:sters(numlist)} {opt eff:obs(string)} {opt ref:it} {opt nol:ist} {opt graph} {opt gname(name)} {opt gopts(string)} {it:nwlsm_options}]
 
 {synoptset 22 tabbed}{...}
 {synopthdr}
@@ -18,6 +18,9 @@
 {synopt :{opt eff:obs(string)}}effective number of observations of the BIC: {cmd:ties} (default), {cmd:dyads} or {cmd:actors}{p_end}
 {synopt :{opt ref:it}}fit the model with the smallest BIC again, so that it is the active model afterwards{p_end}
 {synopt :{opt nol:ist}}do not list the table{p_end}
+{synopt :{opt graph}}plot the BIC (and the BIC of the ties, of the positions and, if present, of the random effects) against the number of clusters; a dashed line marks the smallest BIC{p_end}
+{synopt :{opt gname(name)}}name of the graph{p_end}
+{synopt :{opt gopts(string)}}further {help twoway} options for the graph, such as {cmd:title()} or {cmd:scheme()}{p_end}
 {synopt :{it:nwlsm_options}}options of {help nwlsm} for every fit, such as {opt dim()}, {opt edgecov()}, {opt absdiff()}, {opt sender}, {opt nsample()} and {opt seed()}; not {opt influence()}, {opt bilinear} or {opt family()}{p_end}
 {synoptline}
 
@@ -37,14 +40,11 @@ The BIC is a rough guide: latentnet itself warns that it is not certain to be ap
 {title:Example}
 
 {phang2}{cmd:. nwwebuse lazega, nwclear}{p_end}
-{phang2}{cmd:. nwlsmselect lazega_fr, clusters(0 2 3 4) absdiff(seniority) seed(12) refit}{p_end}
+{phang2}{cmd:. nwlsmselect lazega_fr, clusters(0 2 3 4) absdiff(seniority) seed(12) refit graph}{p_end}
 
 {title:Reference}
 
 {p 4 8 2}Krivitsky, P. N. and Handcock, M. S. 2008. Fitting position latent cluster models for social networks with latentnet. Journal of Statistical Software 24(5).{p_end}
-
-{hline}
-{pstd}{it:nwlsm version 0.6.0, 19 November 2026}{p_end}
 
 {hline}
 {pstd}{it:nwlsm version 0.7.0, 19 November 2026}{p_end}{* nwversion}

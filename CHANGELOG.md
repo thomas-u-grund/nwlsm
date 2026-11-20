@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+- `nwlsmplot`: new options `arrows` / `noarrows` (ties of directed networks as arrows from sender to receiver, the default for directed networks; shortened to the border of the marker), `clustermeans` and `circles` (posterior mean cluster means and circles with the square root of the posterior mean cluster variance as radius, as `plot.means` and `plot.vars` of latentnet's `plot.ergmm()`; fits with `clusters()`), `certainty` (with `clusters`: opacity of the markers by the largest posterior membership probability, four steps), `draws(#)` (a faint cloud of `#` evenly spaced posterior draws of the positions, centred and rotated or reflected to the minimum Kullback-Leibler positions; needs the draws still in memory from the last fit, checked against `e(Zmean)`), `labsize()`, `labposition()`, `noaxes`, `export(filename [, options])` (graph export; `saving()` works as a twoway option). Cluster colours of `clusters` now follow the cluster number.
+- `nwlsmselect`: `graph`, `gname()`, `gopts()` plot the BIC and its parts (ties, positions, random effects) against the number of clusters.
+- Dialogs: new `nwlsmselect.dlg` (opened from a button in `nwlsm.dlg`, as `nwlsm_estat.dlg` and `nwlsmplot.dlg`; the package has one menu entry in the core); the new options in `nwlsmplot.dlg`; `nwlsmselect.dlg` in `nwlsm.pkg`.
+- Mata library rebuilt (Stata 17): `LsmPlotDraws()`, `LsmPlotDrawStore()`; `LsmPlotPrep()` takes an optional argument for the arrow shortening.
+- Not added, compared with `plot.ergmm()`: pie markers (see `certainty`), density plots (`what("density")`), one-dimensional plots, 3-D plots, `Z.ref`, `zoom.on`, `cluster.col`.
+- Tests: `test_nwlsm_plots` (every new option on an undirected and a directed fit, graphs exist, error paths, data in memory unchanged).
+
 ## [0.7.0] - 2026-11-19
 - `estat bic`: the BIC of latentnet's `bic.ergmm()` for binary networks (Euclidean distance), computed at the minimum Kullback-Leibler positions and effects: ties given the positions (coefficients maximising the likelihood for those positions, penalty `p log(effective observations)`; `effobs(ties | dyads | actors)`), positions (normal likelihood without clusters; with `clusters()` the EM fit of a mixture of spherical normals with free variances and latentnet's penalty) and the random effects. `r(bic)` and its parts.
 - `nwlsmselect`: fits the model for several numbers of clusters (`clusters(0 2 3 4)`, 0 = none), computes the BIC of each and lists the fits ranked by BIC; `refit` makes the best model the active one; results `r(table)`, `r(best)`. Help file `nwlsmselect.sthlp`.

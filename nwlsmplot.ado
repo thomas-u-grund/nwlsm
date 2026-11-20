@@ -5,7 +5,8 @@ capture program drop nwlsmplot
 program nwlsmplot
 	version 14
 	syntax [, DIMs(numlist integer min=2 max=2 >=1) MEAN COLor(varname) SIZE(string) LABel(varname) NOEDGES CLUSters ///
-		EDGEColor(string) EDGEWidth(string) MSIZE(string) NAME(string) *]
+		EDGEColor(string) EDGEWidth(string) MSIZE(string) NAME(string) ARRows NOARRows CLUSTERMeans CIRCles DRAWs(integer 0) CERTainty ///
+		LABSize(string) LABPosition(string) NOAXes EXPort(string asis) *]
 	if "`e(cmd)'" != "nwlsm" error 301
 	tempname Z E
 	if "`mean'" != "" matrix `Z' = e(Zmean)
@@ -44,12 +45,41 @@ program nwlsmplot
 		local clsvec "`CLS'"
 		local color "cluster"
 	}
+	if "`arrows'" != "" & "`noarrows'" != "" {
+		di as error "arrows and noarrows cannot be combined"
+		exit 198
+	}
+	if "`arrows'" != "" & "`noedges'" != "" {
+		di as error "arrows and noedges cannot be combined"
+		exit 198
+	}
+	if `draws' < 0 | `draws' > 1000 {
+		di as error "draws() must be between 1 and 1000"
+		exit 198
+	}
+	if "`label'" == "" & (`"`labsize'"' != "" | `"`labposition'"' != "") {
+		di as error "labsize() and labposition() need the option label()"
+		exit 198
+	}
+	if ("`clustermeans'" != "" | "`circles'" != "" | "`certainty'" != "") & ("`e(clusters)'" == "" | "`e(clusters)'" == "0") {
+		di as error "clustermeans, circles and certainty need a fit with latent clusters (option clusters())"
+		exit 198
+	}
+	if "`certainty'" != "" & "`clusters'" == "" {
+		di as error "certainty needs the option clusters (the markers are coloured by cluster, with opacity by the certainty of the membership)"
+		exit 198
+	}
 	_nwsyntax `e(network)', max(1)
 	if `nodes' != `n' {
 		di as error "the network `e(network)' no longer has the number of actors of the fit"
 		exit 198
 	}
 	local netobj_ `netobj'
+	if "`arrows'" != "" & "`directed'" != "true" {
+		di as error "arrows: the network `e(network)' is not directed"
+		exit 198
+	}
+	local usearrows = ("`directed'" == "true" & "`noarrows'" == "" & "`noedges'" == "")
 	* node size: sender, receiver or sociality effects of the fit, or a numeric variable of the data set
 	local sizevar
 	local sizeeff
@@ -103,12 +133,59 @@ program nwlsmplot
 		else matrix `EF' = e(`sizeeff')
 		local sizevec "`EF'"
 	}
-	mata: LsmPlotPrep("`A'", "`Z'", `d1', `d2', `=("`directed'" == "true")', "`=cond("`clusters'" != "", "", "`color'")'", "`clsvec'", "`sizevar'", "`sizevec'", "`label'", `=("`noedges'" == "")')
+	local G = cond("`e(clusters)'" == "", 0, e(clusters))
+	local bil = ("`e(latent)'" == "bilinear")
+	tempname QX CMX ZMX
+	if "`certainty'" != "" {
+		capture matrix `ZMX' = e(Q)
+		if _rc {
+			di as error "the membership probabilities were not stored (too many actors for a Stata matrix)"
+			exit 498
+		}
+		mata: st_matrix("`QX'", rowmax(st_matrix("`ZMX'")))
+	}
+	* circles: the radius is the square root of the posterior mean variance of the cluster
+	local rad
+	if "`clustermeans'" != "" | "`circles'" != "" {
+		matrix `CMX' = e(cmeans)
+		if "`circles'" != "" {
+			tempname VS
+			matrix `VS' = e(vsummary)
+			forvalues g = 1/`G' {
+				local rw = rownumb(`VS', "sigma2_`g'")
+				if `rw' >= . {
+					di as error "the cluster variances were not found in e(vsummary)"
+					exit 498
+				}
+				local rad `rad' `=sqrt(`VS'[`rw', 1])'
+			}
+		}
+	}
+	* the cloud of posterior draws
+	local ndr 0
+	if `draws' > 0 {
+		matrix `ZMX' = e(Zmean)
+		matrix `Z' = e(Z)
+		mata: st_numscalar("__nwlsm_nd", LsmPlotDraws("`Z'", "`ZMX'", `d1', `d2', `draws', `bil'))
+		local ndr = scalar(__nwlsm_nd)
+		scalar drop __nwlsm_nd
+		if `ndr' < 1 {
+			if `ndr' == 0 di as error "draws(): the posterior draws of the fit are not in memory (they stay in memory after nwlsm until the next fit or {bf:clear all})"
+			else di as error "draws(): the draws in memory do not belong to the fit in e(); fit the model again"
+			exit 498
+		}
+		if "`mean'" != "" matrix `Z' = e(Zmean)
+		else matrix `Z' = e(Z)
+	}
+	mata: LsmPlotPrep("`A'", "`Z'", `d1', `d2', `=("`directed'" == "true")', "`=cond("`clusters'" != "", "", "`color'")'", "`clsvec'", "`sizevar'", "`sizevec'", "`label'", `=("`noedges'" == "")', `usearrows')
 	mata: st_local("m", strofreal(rows(__nwlsm_ed)))
+	local ncirc = cond("`circles'" != "", 101 * `G', 0)
+	local nmean = cond("`clustermeans'" != "", `G', 0)
+	local nd = `ndr' * `n'
 	preserve
 	quietly {
 		clear
-		set obs `=`n' + `m''
+		set obs `=`n' + `m' + `nd' + `ncirc' + `nmean''
 		gen double x = .
 		gen double y = .
 		gen double cg = .
@@ -118,21 +195,57 @@ program nwlsmplot
 		gen double ey1 = .
 		gen double ex2 = .
 		gen double ey2 = .
+		gen double qb = .
+		gen double dx = .
+		gen double dy = .
+		gen double da = .
+		gen double dg = .
+		gen double cx = .
+		gen double cy = .
+		gen double cgr = .
+		gen double mx = .
+		gen double my = .
+		gen double mg = .
 		mata: LsmPlotStore()
+		if "`certainty'" != "" mata: st_store((1::`n'), "qb", 1 :+ floor(3.999 :* rowmax((st_matrix("`QX'") :- 1/`G', J(`n', 1, 0))) :/ (1 - 1/`G')))
+		if `nd' > 0 {
+			mata: LsmPlotDrawStore(`n' + `m' + 1)
+			replace dg = cg[da] in `=`n' + `m' + 1'/`=`n' + `m' + `nd''
+		}
+		local o = `n' + `m' + `nd'
+		if `ncirc' > 0 {
+			local k 0
+			forvalues g = 1/`G' {
+				local r : word `g' of `rad'
+				forvalues t = 0/100 {
+					local ++k
+					replace cx = `CMX'[`g', `d1'] + `r' * cos(2 * c(pi) * `t' / 100) in `=`o' + `k''
+					replace cy = `CMX'[`g', `d2'] + `r' * sin(2 * c(pi) * `t' / 100) in `=`o' + `k''
+					replace cgr = `g' in `=`o' + `k''
+				}
+			}
+		}
+		local o = `o' + `ncirc'
+		if `nmean' > 0 {
+			forvalues g = 1/`G' {
+				replace mx = `CMX'[`g', `d1'] in `=`o' + `g''
+				replace my = `CMX'[`g', `d2'] in `=`o' + `g''
+				replace mg = `g' in `=`o' + `g''
+			}
+		}
 	}
+	local pal navy maroon forest_green dkorange teal purple gold cyan olive magenta brown gs8 ltblue red green
 	local plots
+	local nplot 0
 	if "`noedges'" == "" & `m' > 0 {
 		if `"`edgecolor'"' == "" local edgecolor "gs11%60"
 		if `"`edgewidth'"' == "" local edgewidth "vthin"
-		local plots `"(pcspike ey1 ex1 ey2 ex2, lcolor(`edgecolor') lwidth(`edgewidth'))"'
+		if `usearrows' local plots `"(pcarrow ey1 ex1 ey2 ex2, lcolor(`edgecolor') mcolor(`edgecolor') lwidth(`edgewidth') barbsize(small))"'
+		else local plots `"(pcspike ey1 ex1 ey2 ex2, lcolor(`edgecolor') lwidth(`edgewidth'))"'
+		local ++nplot
 	}
-	local mopt
-	if `"`msize'"' == "" local msize "medium"
-	if `"`label'"' != "" local mopt `"mlabel(lb) mlabsize(vsmall) mlabposition(1)"'
-	local wt
-	if "`sizevar'`sizeeff'" != "" local wt "[aweight = w]"
-	else local mopt `"`mopt' msize(`msize')"'
-	local legend
+	* levels of the colour variable
+	local lv
 	if "`color'" != "" {
 		quietly levelsof cg, local(lv)
 		local nl : word count `lv'
@@ -140,16 +253,75 @@ program nwlsmplot
 			di as error "color(): the variable has more than 15 distinct values; recode it into groups"
 			exit 198
 		}
-		local pal navy maroon forest_green dkorange teal purple gold cyan olive magenta brown gs8 ltblue red green
+	}
+	* cloud of posterior draws (under the actors)
+	if `ndr' > 0 {
+		if "`color'" != "" {
+			local g 0
+			foreach v of local lv {
+				local ++g
+				local pi = cond("`clusters'" != "", `v', `g')
+				local plots `"`plots' (scatter dy dx if dg == `v', msymbol(point) msize(small) mcolor(`: word `pi' of `pal''%12))"'
+				local ++nplot
+			}
+		}
+		else {
+			local plots `"`plots' (scatter dy dx, msymbol(point) msize(small) mcolor(navy%12))"'
+			local ++nplot
+		}
+	}
+	* variance circles and cluster means
+	if `ncirc' > 0 {
+		forvalues g = 1/`G' {
+			local cc = cond("`clusters'" != "", "`: word `g' of `pal''", "black")
+			local plots `"`plots' (line cy cx if cgr == `g', lcolor(`cc') lpattern(dash) lwidth(thin))"'
+			local ++nplot
+		}
+	}
+	if `nmean' > 0 {
+		forvalues g = 1/`G' {
+			local cc = cond("`clusters'" != "", "`: word `g' of `pal''", "black")
+			local plots `"`plots' (scatter my mx if mg == `g', msymbol(plus) msize(large) mcolor(`cc'))"'
+			local ++nplot
+		}
+	}
+	local mopt
+	if `"`msize'"' == "" local msize "medium"
+	if `"`labsize'"' == "" local labsize "vsmall"
+	if `"`labposition'"' == "" local labposition "1"
+	if `"`label'"' != "" local mopt `"mlabel(lb) mlabsize(`labsize') mlabposition(`labposition')"'
+	local wt
+	if "`sizevar'`sizeeff'" != "" local wt "[aweight = w]"
+	else local mopt `"`mopt' msize(`msize')"'
+	local legend
+	if "`color'" != "" {
+		local pal2 `"`pal'"'
 		local g 0
 		local order
-		local nplot = cond("`noedges'" == "" & `m' > 0, 1, 0)
 		foreach v of local lv {
 			local ++g
-			local ++nplot
+			local pi = cond("`clusters'" != "", `v', `g')
+			local col : word `pi' of `pal2'
 			local lab "`v'"
-			local plots `"`plots' (scatter y x `wt' if cg == `v', mcolor(`: word `g' of `pal''%75) mlabcolor(`: word `g' of `pal'') `mopt')"'
-			local order `"`order' `nplot' "`lab'""'
+			if "`certainty'" != "" {
+				local last
+				local bi 0
+				foreach op in 30 50 75 100 {
+					local ++bi
+					quietly count if cg == `v' & qb == `bi'
+					if r(N) > 0 {
+						local ++nplot
+						local last `nplot'
+						local plots `"`plots' (scatter y x `wt' if cg == `v' & qb == `bi', mcolor(`col'%`op') mlabcolor(`col') `mopt')"'
+					}
+				}
+				local order `"`order' `last' "`lab'""'
+			}
+			else {
+				local ++nplot
+				local plots `"`plots' (scatter y x `wt' if cg == `v', mcolor(`col'%75) mlabcolor(`col') `mopt')"'
+				local order `"`order' `nplot' "`lab'""'
+			}
 		}
 		local legend `"legend(order(`order') position(3) cols(1) title("`color'", size(small)))"'
 	}
@@ -159,7 +331,14 @@ program nwlsmplot
 	}
 	local ttl `"title("Latent positions")"'
 	if strpos(`"`options'"', "title(") local ttl
-	twoway `plots', xtitle("dimension `d1'") ytitle("dimension `d2'") `ttl' aspectratio(1) xlabel(, grid) ylabel(, grid) `legend' ///
+	local axopt `"xtitle("dimension `d1'") ytitle("dimension `d2'") xlabel(, grid) ylabel(, grid)"'
+	if "`noaxes'" != "" local axopt `"xtitle("") ytitle("") xscale(off) yscale(off) xlabel(none) ylabel(none)"'
+	twoway `plots', `axopt' `ttl' aspectratio(1) `legend' ///
 		`=cond("`name'" != "", "name(`name', replace)", "")' `options'
+	if `"`export'"' != "" {
+		gettoken __fn __ex : export, parse(",")
+		local __ex = trim(substr(`"`__ex'"', 2, .))
+		graph export `__fn', replace `__ex'
+	}
 	restore
 end

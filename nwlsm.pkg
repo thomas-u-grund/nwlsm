@@ -16,6 +16,7 @@ f nwlsmselect.sthlp
 f nwlsmplot.ado
 f nwlsmplot.sthlp
 f nwlsm.dlg
+f nwlsmselect.dlg
 f nwlsmplot.dlg
 f nwlsm_estat.dlg
 f lib/lnwlsm.mlib

@@ -7,7 +7,7 @@ OK ok1, label("OK")
 CANCEL can1, label("Cancel")
 SUBMIT sub1, label("Submit")
 RESET res1
-POSITION 10 10 560 380
+POSITION 10 10 560 596
 
 DIALOG main, title("nwlsmplot - Plot of the latent positions")
 BEGIN
@@ -25,15 +25,31 @@ BEGIN
   EDIT ed_msize 250 116 160 ., nomem
   TEXT tx_lab 20 142 220 ., label("Label by string variable:")
   VARNAME vn_lab 250 142 160 ., nomem
-  GROUPBOX gb_edg 10 190 540 86, label("Ties")
-  CHECKBOX cx_noe 20 210 220 ., label("do not draw the ties")
-  TEXT tx_ecol 20 238 100 ., label("Tie colour:")
-  EDIT ed_ecol 120 238 120 ., nomem
-  TEXT tx_ewid 270 238 100 ., label("Tie width:")
-  EDIT ed_ewid 370 238 120 ., nomem
-  TEXT tx_name 20 292 220 ., label("Graph name:")
-  EDIT ed_name 250 292 160 ., nomem
-  TEXT tx_note 20 324 520 ., label("Needs a fit of nwlsm in memory.")
+  TEXT tx_lsz 20 168 220 ., label("Label size, position (clock, e.g. 1 or 6):")
+  EDIT ed_lsz 250 168 80 ., nomem
+  EDIT ed_lpos 340 168 70 ., nomem
+  GROUPBOX gb_edg 10 196 540 108, label("Ties")
+  CHECKBOX cx_noe 20 216 220 ., label("do not draw the ties")
+  CHECKBOX cx_arr 270 216 140 ., label("arrows (directed)")
+  CHECKBOX cx_noarr 420 216 120 ., label("no arrows")
+  TEXT tx_ecol 20 246 100 ., label("Tie colour:")
+  EDIT ed_ecol 120 246 120 ., nomem
+  TEXT tx_ewid 270 246 100 ., label("Tie width:")
+  EDIT ed_ewid 370 246 120 ., nomem
+  GROUPBOX gb_pos 10 312 540 138, label("Uncertainty and clusters")
+  TEXT tx_drw 20 332 220 ., label("Cloud of posterior draws (0 = none):")
+  SPINNER sp_drw 250 332 80 ., default(0) min(0) max(1000) nomem
+  CHECKBOX cx_cm 20 360 250 ., label("cluster means (fit with clusters)")
+  CHECKBOX cx_circ 280 360 250 ., label("variance circles (fit with clusters)")
+  CHECKBOX cx_cert 20 388 500 ., label("opacity by certainty of the membership (needs by cluster)")
+  TEXT tx_note2 20 416 520 ., label("The draws stay in memory after nwlsm until the next fit.")
+  GROUPBOX gb_out 10 458 540 100, label("Graph")
+  CHECKBOX cx_noax 20 478 220 ., label("no axes")
+  TEXT tx_name 250 478 100 ., label("Graph name:")
+  EDIT ed_name 350 478 150 ., nomem
+  TEXT tx_exp 20 508 200 ., label("Export to file (.png, .pdf, ...):")
+  FILE fi_exp 230 508 310 ., save label("Browse...") filter("PNG (*.png)|*.png|PDF (*.pdf)|*.pdf|All (*.*)|*.*") nomem
+  TEXT tx_note 20 566 520 ., label("Needs a fit of nwlsm in memory.")
 END
 
 PROGRAM command
@@ -63,8 +79,49 @@ BEGIN
 	if main.vn_lab.isneq("") {
 		put " label(" main.vn_lab ")"
 	}
+	if main.cx_arr & main.cx_noarr {
+		stopbox stop "arrows and no arrows cannot be combined."
+	}
+	if main.ed_lsz.isneq("") | main.ed_lpos.isneq("") {
+		if main.vn_lab.iseq("") {
+			stopbox stop "Label size and position need a label variable."
+		}
+	}
+	if main.cx_cert & !main.cx_clu {
+		stopbox stop "Opacity by certainty needs colouring by cluster."
+	}
 	if main.cx_noe {
 		put " noedges"
+	}
+	if main.cx_arr {
+		put " arrows"
+	}
+	if main.cx_noarr {
+		put " noarrows"
+	}
+	if main.ed_lsz.isneq("") {
+		put " labsize(" main.ed_lsz ")"
+	}
+	if main.ed_lpos.isneq("") {
+		put " labposition(" main.ed_lpos ")"
+	}
+	if !main.sp_drw.isdefault() {
+		put " draws(" main.sp_drw ")"
+	}
+	if main.cx_cm {
+		put " clustermeans"
+	}
+	if main.cx_circ {
+		put " circles"
+	}
+	if main.cx_cert {
+		put " certainty"
+	}
+	if main.cx_noax {
+		put " noaxes"
+	}
+	if main.fi_exp.isneq("") {
+		put " export(" main.fi_exp ")"
 	}
 	if main.ed_ecol.isneq("") {
 		put " edgecolor(" main.ed_ecol ")"

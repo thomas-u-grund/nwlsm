@@ -1,0 +1,135 @@
+/* nwlsmselect.dlg - dialog of nwlsmselect (number of latent clusters of an nwlsm model by BIC). */
+VERSION 14.0
+INCLUDE _std_small
+SYNCHRONOUS_ONLY
+HELP hlp1, view("help nwlsmselect")
+OK ok1, label("OK")
+CANCEL can1, label("Cancel")
+SUBMIT sub1, label("Submit")
+RESET res1
+POSITION 10 10 600 470
+
+SCRIPT PREINIT
+BEGIN
+	program initialize
+END
+
+SCRIPT POSTINIT
+BEGIN
+	script gr_off
+END
+
+DIALOG main, title("nwlsmselect - Number of latent clusters by BIC")
+BEGIN
+  TEXT tx_net 20 12 260 ., label("Network (binary):")
+  COMBOBOX cb_net 290 12 200 ., dropdown contents(netlist) nomem
+  GROUPBOX gb_sel 10 40 580 120, label("Selection")
+  TEXT tx_clu 20 60 260 ., label("Numbers of clusters (0 = none, 2 to 6):")
+  EDIT ed_clu 290 60 200 ., default("0 2 3 4") nomem
+  TEXT tx_eff 20 88 260 ., label("Effective number of observations:")
+  COMBOBOX cb_eff 290 88 200 ., dropdownlist contents(l_eff) values(l_eff_v) nomem
+  CHECKBOX cx_ref 20 116 540 ., label("fit the best model again, so that it is the active model afterwards (refit)")
+  CHECKBOX cx_nol 20 138 540 ., label("do not list the table (nolist)")
+  GROUPBOX gb_gr 10 168 580 86, label("Graph of the BIC and its parts")
+  CHECKBOX cx_gr 20 188 300 ., label("draw the graph") onclickon(script gr_on) onclickoff(script gr_off)
+  TEXT tx_gn 20 216 120 ., label("Graph name:")
+  EDIT ed_gn 150 216 150 ., nomem
+  GROUPBOX gb_mod 10 262 580 118, label("Options of every nwlsm fit")
+  TEXT tx_dim 20 282 260 ., label("Latent dimensions:")
+  SPINNER sp_dim 290 282 70 ., default(2) min(1) max(10) nomem
+  TEXT tx_edge 20 310 260 ., label("Edge covariates (networks or matrices):")
+  EDIT ed_edge 290 310 290 ., nomem
+  TEXT tx_abs 20 336 260 ., label("Absolute difference of node variables:")
+  VARLIST vl_abs 290 336 290 ., nomem
+  GROUPBOX gb_mc 10 388 580 60, label("Sampler")
+  TEXT tx_ns 20 412 130 ., label("Draws kept:")
+  SPINNER sp_ns 150 412 100 ., default(4000) min(10) max(10000000) nomem
+  TEXT tx_seed 300 412 130 ., label("Seed (blank = none):")
+  EDIT ed_seed 440 412 120 ., nomem
+END
+
+LIST l_eff
+BEGIN
+	ties (default)
+	dyads
+	actors
+END
+
+LIST l_eff_v
+BEGIN
+	ties
+	dyads
+	actors
+END
+
+LIST netlist
+BEGIN
+	// populated at runtime by _nwdialog.ado
+END
+
+SCRIPT gr_on
+BEGIN
+	main.tx_gn.enable
+	main.ed_gn.enable
+END
+
+SCRIPT gr_off
+BEGIN
+	main.tx_gn.disable
+	main.ed_gn.disable
+END
+
+PROGRAM initialize
+BEGIN
+	put "_nwdialog nwlsmselect"
+	stata hidden immediate
+END
+
+PROGRAM command
+BEGIN
+	if main.cb_net.iseq(" ") | main.cb_net.iseq("") {
+		stopbox stop "Choose a network."
+	}
+	if main.ed_clu.iseq("") {
+		stopbox stop "Enter at least two numbers of clusters (0 stands for no clusters), for example 0 2 3 4."
+	}
+	if !main.ed_clu.isnumlist() {
+		stopbox stop "Numbers of clusters: enter integers between 0 and 6."
+	}
+	if main.ed_seed.isneq("") & !main.ed_seed.isnumlist() {
+		stopbox stop "Seed: enter an integer."
+	}
+	put "nwlsmselect " main.cb_net
+	put ", clusters(" main.ed_clu ")"
+	if main.cb_eff.isneq("ties") & main.cb_eff.isneq("") {
+		put " effobs(" main.cb_eff ")"
+	}
+	if main.cx_ref {
+		put " refit"
+	}
+	if main.cx_nol {
+		put " nolist"
+	}
+	if main.cx_gr {
+		put " graph"
+		if main.ed_gn.isneq("") {
+			put " gname(" main.ed_gn ")"
+		}
+	}
+	if !main.sp_dim.isdefault() {
+		put " dim(" main.sp_dim ")"
+	}
+	if main.ed_edge.isneq("") {
+		put " edgecov(" main.ed_edge ")"
+	}
+	if main.vl_abs.isneq("") {
+		put " absdiff(" main.vl_abs ")"
+	}
+	if !main.sp_ns.isdefault() {
+		put " nsample(" main.sp_ns ")"
+	}
+	if main.ed_seed.isneq("") {
+		put " seed(" main.ed_seed ")"
+	}
+	stata
+END

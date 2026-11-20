@@ -51,6 +51,8 @@ capture mata: mata drop LsmCheckInfl()
 capture mata: mata drop lsm_ztrans()
 capture mata: mata drop LsmPlotPrep()
 capture mata: mata drop LsmPlotStore()
+capture mata: mata drop LsmPlotDraws()
+capture mata: mata drop LsmPlotDrawStore()
 capture mata: mata drop LsmBic()
 capture mata: mata drop LsmBicFit()
 capture mata: mata drop lsm_condmle()
@@ -1276,11 +1278,11 @@ real rowvector LsmCheckMKL(real matrix y, real scalar dir, real matrix X, real s
 
 // plot data for nwlsmplot: node rows (x, y, colour group, weight, label) and edge rows (x1, y1, x2, y2) kept in externals until LsmPlotStore()
 void LsmPlotPrep(string scalar Aname, string scalar Zname, real scalar d1, real scalar d2, real scalar dir, string scalar color, string scalar clsmat,
-	string scalar sizevar, string scalar sizemat, string scalar label, real scalar edges)
+	string scalar sizevar, string scalar sizemat, string scalar label, real scalar edges, | real scalar arrows)
 {
 	real matrix A, Z, ed, pd
 	real colvector w, cg
-	real scalar n, i, j
+	real scalar n, i, j, gap, len, f
 	string colvector lb
 	external __nwlsm_pd, __nwlsm_ed, __nwlsm_lb
 
@@ -1302,11 +1304,18 @@ void LsmPlotPrep(string scalar Aname, string scalar Zname, real scalar d1, real 
 	if (label != "") lb = st_sdata(., label)
 	pd = (Z[., d1], Z[., d2], cg, w)
 	ed = J(0, 4, .)
+	if (args() < 12) arrows = 0
+	// arrows end at the border of the marker: shortened by 2.5 per cent of the larger range of the two axes
+	gap = arrows ? 0.025 * max((max(Z[., d1]) - min(Z[., d1]), max(Z[., d2]) - min(Z[., d2]))) : 0
 	if (edges) {
 		for (i = 1; i <= n; i++) for (j = 1; j <= n; j++) {
 			if (i == j) continue
 			if (!dir & j < i) continue
-			if (A[i, j] < . & A[i, j] != 0) ed = ed \ (Z[i, d1], Z[i, d2], Z[j, d1], Z[j, d2])
+			if (A[i, j] < . & A[i, j] != 0) {
+				len = sqrt((Z[j, d1] - Z[i, d1])^2 + (Z[j, d2] - Z[i, d2])^2)
+				f = (gap > 0 & len > 2 * gap) ? (len - gap) / len : 1
+				ed = ed \ (Z[i, d1], Z[i, d2], Z[i, d1] + f * (Z[j, d1] - Z[i, d1]), Z[i, d2] + f * (Z[j, d2] - Z[i, d2]))
+			}
 		}
 	}
 	__nwlsm_pd = pd
@@ -1324,6 +1333,55 @@ void LsmPlotStore()
 	st_store((1::n), ("x", "y", "cg", "w"), __nwlsm_pd)
 	st_sstore((1::n), "lb", __nwlsm_lb)
 	if (m > 0) st_store((n + 1::n + m), ("ex1", "ey1", "ex2", "ey2"), __nwlsm_ed)
+}
+
+// cloud of posterior draws for nwlsmplot, draws(#): the draws kept by the last fit (Mata external), centred (not for bilinear fits) and rotated or reflected to the
+// minimum Kullback-Leibler positions as in LsmFit; # evenly spaced draws are kept. Returns the number of draws, or -1 when the draws in memory are not those of
+// the fit in e() (the mean of the aligned draws must equal e(Zmean)), 0 when no draws are in memory.
+real scalar LsmPlotDraws(string scalar Zname, string scalar Zmname, real scalar d1, real scalar d2, real scalar nuse, real scalar bil)
+{
+	real matrix Zr, Zm, Zi, Za, out
+	real scalar S, n, d, it, k
+	real colvector idx
+	external __nwlsm_Z, __nwlsm_pdr
+
+	Zr = st_matrix(Zname)
+	Zm = st_matrix(Zmname)
+	n = rows(Zr)
+	d = cols(Zr)
+	S = rows(__nwlsm_Z)
+	if (S == 0) return(0)
+	if (cols(__nwlsm_Z) != n * d) return(-1)
+	Za = J(n, d, 0)
+	idx = (nuse >= S ? (1::S) : round(1 :+ (0::(nuse - 1)) :* ((S - 1) / max((nuse - 1, 1)))))
+	out = J(0, 3, .)
+	k = 1
+	for (it = 1; it <= S; it++) {
+		Zi = colshape(__nwlsm_Z[it, .], d)
+		if (!bil) Zi = Zi :- mean(Zi)
+		Zi = Zi * lsm_procR(Zi, Zr)
+		Za = Za + Zi
+		if (k <= rows(idx)) if (idx[k] == it) {
+			out = out \ (Zi[., d1], Zi[., d2], (1::n))
+			k++
+			// the same draw may be asked for twice when # is close to the number of draws
+			while (k <= rows(idx)) {
+				if (idx[k] != it) break
+				k++
+			}
+		}
+	}
+	Za = Za / S
+	if (max(abs(Za - Zm)) > 1e-6) return(-1)
+	__nwlsm_pdr = out
+	return(rows(out) / n)
+}
+
+void LsmPlotDrawStore(real scalar first)
+{
+	external __nwlsm_pdr
+
+	st_store((first::first + rows(__nwlsm_pdr) - 1), ("dx", "dy", "da"), __nwlsm_pdr)
 }
 
 // ---- BIC of the latent position model as latentnet's bic.ergmm (latentnet 2.12.0) ----

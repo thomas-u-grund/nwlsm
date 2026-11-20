@@ -92,8 +92,9 @@ BEGIN
   EDIT ed_oa 425 758 70 ., nomem
   EDIT ed_oq 505 758 70 ., nomem
   GROUPBOX gb_post 10 798 580 54, label("After the fit")
-  BUTTON bt_est 20 818 270 ., label("Postestimation (estat)...") onpush(script openestat)
-  BUTTON bt_plot 310 818 270 ., label("Plot of the positions...") onpush(script openplot)
+  BUTTON bt_est 20 818 180 ., label("Postestimation (estat)...") onpush(script openestat)
+  BUTTON bt_plot 210 818 180 ., label("Plot of the positions...") onpush(script openplot)
+  BUTTON bt_sel 400 818 180 ., label("Number of clusters (BIC)...") onpush(script openselect)
 END
 
 LIST l_fam
@@ -161,6 +162,11 @@ END
 SCRIPT openplot
 BEGIN
 	view dialog nwlsmplot
+END
+
+SCRIPT openselect
+BEGIN
+	view dialog nwlsmselect
 END
 
 PROGRAM command
