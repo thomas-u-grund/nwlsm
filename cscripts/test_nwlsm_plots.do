@@ -224,4 +224,12 @@ if "`c1'" == "`cks'" {
 	exit 9
 }
 graph drop _all
+* export(file, options) with and without name()
+capture erase "`tmpd'/eo1.png"
+nwlsmplot, export(`tmpd'/eo1.png, width(500))
+confirm file "`tmpd'/eo1.png"
+capture erase "`tmpd'/eo2.png"
+nwlsmplot, name(eo2) export(`tmpd'/eo2.png, width(500))
+confirm file "`tmpd'/eo2.png"
+graph drop _all
 display "PASS test_nwlsm_plots: plot options (arrows, clustermeans, circles, draws, certainty, labels, noaxes, export) and nwlsmselect graph"
