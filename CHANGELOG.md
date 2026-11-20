@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.0.2] - 2026-11-20
+- `edgecov()` with a network, or with a matrix that has a missing diagonal (as the matrix of a network from `nwtomata` has), no longer stops with "edge covariates must not have missing values" (r(416)): the diagonal of a one-mode matrix is not a dyad and is ignored (set to 0); missing values off the diagonal are still an error. Test `cscripts/test_nwlsm_edgecov.do`.
+
+Tested on macOS with Stata 17 BE: dialog assembly test (12 cases), `test_dlg_plots`, `test_nwlsm_plots`, `test_nwlsm_errors`, `test_nwlsm_edgecov`. Linux, Windows and Stata 18: not run yet.
+
 ## [1.0.1] - 2026-11-20
 - Dialogs: `nwlsm_estat.dlg` has a field for the graph name (`name()`) of the graphs of `estat mcmcdiag`, `gof`, `ppcheck` and `influence`; `nwlsmselect.dlg` has a field for the graph options (`gopts()`).
 - The dialog test `tools/dlg_assembly_test.py` checks the command that `nwlsmplot.dlg`, `nwlsm_estat.dlg` and `nwlsmselect.dlg` build; `cscripts/test_dlg_plots.do` runs the command lines of the graph options.

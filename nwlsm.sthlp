@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 1.0.1  20nov2026 author: Thomas Grund}{...}
+{* *! version 1.0.2  20nov2026 author: Thomas Grund}{...}
 {title:Title}
 
 {p2colset 9 17 24 2}{...}
@@ -33,7 +33,7 @@
 {synopt :{opt tri:als(spec)}}binomial family: the number of trials, as a number, a network or a Stata matrix{p_end}
 {synopt :{opt dispv:ar(#)}, {opt dispd:f(#)}}normal family: scale (default 1) and degrees of freedom (default 3) of the prior of the dispersion (the variance of the values){p_end}
 {synopt :{opt dim(#)}}number of latent dimensions, 1 to 10; default {cmd:2}{p_end}
-{synopt :{opt edgecov(list)}}edge covariates: networks of the same actors, or Stata matrices with one row and column per actor{p_end}
+{synopt :{opt edgecov(list)}}edge covariates: networks of the same actors, or Stata matrices with one row and column per actor; the diagonal is ignored, missing values off the diagonal are an error{p_end}
 {synopt :{opt absdiff(varlist)}}numeric node variables (one observation per actor, in the order of the actors) entered as the absolute difference |x_i - x_j|{p_end}
 {synopt :{opt sender}}random sender effect for every actor (directed networks){p_end}
 {synopt :{opt receiver}}random receiver effect for every actor (directed networks){p_end}
@@ -326,4 +326,4 @@ A user manual (PDF in the {cmd:manual} folder of the package source) is archived
 {p 4 8 2}Krivitsky, P. N., Handcock, M. S., Raftery, A. E. and Hoff, P. D. 2009. Representing degree distributions, clustering, and homophily in social networks with latent cluster random effects models. Social Networks 31: 204-213.{p_end}
 
 {hline}
-{pstd}{it:nwlsm version 1.0.1, 20 November 2026}{p_end}{* nwversion}
+{pstd}{it:nwlsm version 1.0.2, 20 November 2026}{p_end}{* nwversion}

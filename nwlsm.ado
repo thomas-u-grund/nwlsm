@@ -1,4 +1,4 @@
-*! version 1.0.1  20nov2026 nwlsm
+*! version 1.0.2  20nov2026 nwlsm
 * Copyright (C) 2026 Thomas U. Grund
 * This file is part of nwlsm, a Stata package for latent space models for networks. It follows the latent space model of
 * Hoff, Raftery and Handcock (2002) as implemented in the R package latentnet (Krivitsky and Handcock) and is written independently.
@@ -271,7 +271,9 @@ program nwlsm, eclass
 			local __names `__names' absdiff_`__v'
 		}
 	}
-	mata: st_local("__hm", strofreal(hasmissing(__nwlsm_X)))
+	* the diagonal of a one-mode matrix is not a dyad: a missing diagonal (as in a network matrix) is set to 0, missing off-diagonal values stay an error
+	mata: st_local("__hm", strofreal(rows(__nwlsm_X) > 0 ? any((__nwlsm_X :>= .) :* (1 :- (J(rows(__nwlsm_X) / `nodes', 1, 1) # I(`nodes')))) : 0))
+	if !`__hm' mata: __nwlsm_X = editmissing(__nwlsm_X, 0)
 	if `__hm' {
 		capture mata: mata drop __nwlsm_y __nwlsm_X __nwlsm_tr
 		di as error "edge covariates must not have missing values"
@@ -385,7 +387,7 @@ program nwlsm, eclass
 	matrix colnames `VT' = mean sd mcse lower95 upper95
 	ereturn post `B' `V', obs(`__ny')
 	ereturn local cmd "nwlsm"
-	ereturn local version "1.0.1"
+	ereturn local version "1.0.2"
 	ereturn local estat_cmd "nwlsm_estat"
 	ereturn local title "`=cond(`__io', "Latent space model for social influence", "Latent space model")' (`=cond("`bilinear'" != "", "bilinear", "Euclidean distance")'; `__famname' family), posterior by MCMC"
 	ereturn local latent = cond("`bilinear'" != "", "bilinear", "euclidean")
