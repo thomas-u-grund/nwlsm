@@ -16,16 +16,18 @@
 {synoptline}
 {synopt :{opt dims(# #)}}the two latent dimensions on the axes; default {cmd:1 2}{p_end}
 {synopt :{opt mean}}plot the mean of the aligned draws {cmd:e(Zmean)} instead of the minimum Kullback-Leibler positions {cmd:e(Z)}{p_end}
-{synopt :{opt color(varname)}}colour the actors by the values of a variable (at most 15 values){p_end}
+{synopt :{opt color(varname)}}colour the actors by the values of a variable (at most 15 values); the legend shows its value labels, if it has them, and its variable label as the legend title{p_end}
+{synopt :{opt colors(list)}}colours of the groups of {opt color()} or {opt clusters}: a list of Stata colour names, or {cmd:gray}, where the groups differ by gray value and by marker (filled and hollow circles, diamonds, triangles, squares) so that they stay apart in a black-and-white print{p_end}
 {synopt :{opt clus:ters}}colour the actors by their latent cluster (after {cmd:nwlsm, clusters()}); not with {opt color()}{p_end}
 {synopt :{opt size(spec)}}size the actors by {cmd:sender}, {cmd:receiver} or {cmd:sociality} (posterior mean effects of the fit), by {cmd:influence} (the influence each actor exerts, after the influence model) or by a numeric variable{p_end}
-{synopt :{opt label(varname)}}label the actors with a string variable{p_end}
+{synopt :{opt label(varname)}}label the actors with a string variable, or with a numeric variable (its value labels, or the numbers where it has none){p_end}
 {synopt :{opt labs:ize(string)}}size of the labels; default {cmd:vsmall}{p_end}
 {synopt :{opt labp:osition(string)}}position of the labels as a clock position (0 to 12), or {cmd:auto}; default {cmd:auto}{p_end}
 {synopt :{opt noedges}}do not draw the ties{p_end}
 {synopt :{opt arr:ows}}draw the ties of a directed network as arrows from sender to receiver (the default for directed networks){p_end}
 {synopt :{opt noarr:ows}}draw the ties of a directed network as lines without arrow heads{p_end}
-{synopt :{opt edgecolor(string)}}colour of the tie lines; default {cmd:gs11%60}{p_end}
+{synopt :{opt arrowsize(string)}}size of the arrow heads ({cmd:vsmall}, {cmd:small}, ...); default {cmd:small}, {cmd:vsmall} when the network has more than 400 ties{p_end}
+{synopt :{opt edgecolor(string)}}colour of the tie lines; default {cmd:gs11%60}, a lighter {cmd:gs12%35} when the network has more than 400 ties{p_end}
 {synopt :{opt edgewidth(string)}}width of the tie lines; default {cmd:vthin}{p_end}
 {synopt :{opt msize(string)}}marker size when {opt size()} is not given; default {cmd:medium}{p_end}
 {synopt :{opt clusterm:eans}}mark the posterior mean cluster means {cmd:e(cmeans)} with a plus sign (fit with {cmd:clusters()}){p_end}
@@ -36,7 +38,7 @@
 {synopt :{opt noeq:ual}}do not force equal scales: the plot is square and each axis spans its own range (by default one unit has the same length on both axes){p_end}
 {synopt :{opt exp:ort(filename [, options])}}export the graph with {help graph export}, replacing an existing file; the extension of {it:filename} sets the format{p_end}
 {synopt :{opt name(name)}}name of the graph{p_end}
-{synopt :{it:twoway_options}}other options of {help twoway}, such as {cmd:title()}, {cmd:scheme()} or {cmd:saving()}{p_end}
+{synopt :{it:twoway_options}}other options of {help twoway}, such as {cmd:title()}, {cmd:scheme()} or {cmd:saving()}; they come last and override the defaults. Titles, subtitles, axis titles and the legend title are black by default{p_end}
 {synoptline}
 
 {title:Description}

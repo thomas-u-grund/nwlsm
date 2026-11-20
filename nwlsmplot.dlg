@@ -23,7 +23,7 @@ BEGIN
   EDIT ed_size 250 90 160 ., nomem
   TEXT tx_msize 20 116 220 ., label("Marker size (without size by):")
   EDIT ed_msize 250 116 160 ., nomem
-  TEXT tx_lab 20 142 220 ., label("Label by string variable:")
+  TEXT tx_lab 20 142 220 ., label("Label by variable (string or numeric):")
   VARNAME vn_lab 250 142 160 ., nomem
   TEXT tx_lsz 20 168 220 ., label("Label size, position (clock, e.g. 1 or 6):")
   EDIT ed_lsz 250 168 80 ., nomem
@@ -36,6 +36,10 @@ BEGIN
   EDIT ed_ecol 120 246 120 ., nomem
   TEXT tx_ewid 270 246 100 ., label("Tie width:")
   EDIT ed_ewid 370 246 120 ., nomem
+  TEXT tx_cols 20 274 100 ., label("Group colours:")
+  EDIT ed_cols 120 274 120 ., nomem
+  TEXT tx_asz 270 274 100 ., label("Arrowhead size:")
+  EDIT ed_asz 370 274 120 ., nomem
   GROUPBOX gb_pos 10 312 540 138, label("Uncertainty and clusters")
   TEXT tx_drw 20 332 220 ., label("Cloud of posterior draws (0 = none):")
   SPINNER sp_drw 250 332 80 ., default(0) min(0) max(1000) nomem
@@ -99,6 +103,12 @@ BEGIN
 	}
 	if main.cx_noarr {
 		put " noarrows"
+	}
+	if main.ed_cols.isneq("") {
+		put " colors(" main.ed_cols ")"
+	}
+	if main.ed_asz.isneq("") {
+		put " arrowsize(" main.ed_asz ")"
 	}
 	if main.ed_lsz.isneq("") {
 		put " labsize(" main.ed_lsz ")"

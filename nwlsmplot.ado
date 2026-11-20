@@ -4,8 +4,10 @@
 capture program drop nwlsmplot
 program nwlsmplot, rclass
 	version 14
+	* Stata reads noarrows as the negation of arrows; a real option of its own is needed
+	local 0 = subinstr(`"`0'"', "noarrows", "arrowsoff", .)
 	syntax [, DIMs(numlist integer min=2 max=2 >=1) MEAN COLor(varname) SIZE(string) LABel(varname) NOEDGES CLUSters ///
-		EDGEColor(string) EDGEWidth(string) MSIZE(string) NAME(string) ARRows NOARRows CLUSTERMeans CIRCles DRAWs(integer 0) CERTainty ///
+		EDGEColor(string) EDGEWidth(string) MSIZE(string) NAME(string) ARRows ARROWSOFF ARROWSize(string) COLORS(string) CLUSTERMeans CIRCles DRAWs(integer 0) CERTainty ///
 		LABSize(string) LABPosition(string) NOAXes NOEQual EXPort(string asis) *]
 	if "`e(cmd)'" != "nwlsm" error 301
 	tempname Z E
@@ -45,7 +47,7 @@ program nwlsmplot, rclass
 		local clsvec "`CLS'"
 		local color "cluster"
 	}
-	if "`arrows'" != "" & "`noarrows'" != "" {
+	if "`arrows'" != "" & "`arrowsoff'" != "" {
 		di as error "arrows and noarrows cannot be combined"
 		exit 198
 	}
@@ -79,7 +81,7 @@ program nwlsmplot, rclass
 		di as error "arrows: the network `e(network)' is not directed"
 		exit 198
 	}
-	local usearrows = ("`directed'" == "true" & "`noarrows'" == "" & "`noedges'" == "")
+	local usearrows = ("`directed'" == "true" & "`arrowsoff'" == "" & "`noedges'" == "")
 	* node size: sender, receiver or sociality effects of the fit, or a numeric variable of the data set
 	local sizevar
 	local sizeeff
@@ -108,16 +110,36 @@ program nwlsmplot, rclass
 			local sizevar `size'
 		}
 	}
-	if "`label'" != "" {
-		capture confirm string variable `label'
-		if _rc {
-			di as error "label(): {bf:`label'} must be a string variable"
-			exit 198
-		}
-	}
 	if ("`color'" != "" & "`clusters'" == "" | "`sizevar'" != "" | "`label'" != "") & _N != `n' {
 		di as error "{p 0 0 2}color(), size() and label() take variables with one observation per actor in the order of the actors of {bf:`e(network)'}; the data set has `=_N' observations.{p_end}"
 		exit 198
+	}
+	* label(): a string variable as it is; a numeric variable by its value labels (the numbers where it has none)
+	if "`label'" != "" {
+		capture confirm string variable `label'
+		if _rc {
+			tempvar lbs
+			local lbvl : value label `label'
+			if "`lbvl'" != "" quietly decode `label', generate(`lbs')
+			else quietly generate str40 `lbs' = string(`label')
+			quietly replace `lbs' = string(`label') if `lbs' == "" & `label' < .
+			local labelvar "`label'"
+			local label "`lbs'"
+		}
+	}
+	* color(): legend entries by the value labels of the variable, the legend title by its variable label
+	local clv
+	local cttl "`color'"
+	if "`color'" != "" & "`clusters'" == "" {
+		quietly levelsof `color', local(clv)
+		local ci 0
+		foreach v of local clv {
+			local ++ci
+			local cl_`ci' : label (`color') `v'
+			local cl_`ci' = subinstr(`"`cl_`ci''"', `"""', "", .)
+		}
+		local cvlab : variable label `color'
+		if `"`cvlab'"' != "" local cttl = subinstr(`"`cvlab'"', `"""', "", .)
 	}
 	* collect the data for the plot (before the data in memory are replaced)
 	tempname A
@@ -235,12 +257,26 @@ program nwlsmplot, rclass
 		}
 	}
 	local pal navy maroon forest_green dkorange teal purple gold cyan olive magenta brown gs8 ltblue red green
+	* colors(): a list of colours for the groups; gray (or grey): groups differ by gray value and by marker (filled and hollow)
+	local syms
+	local gray 0
+	if `"`colors'"' != "" {
+		if inlist(lower(`"`colors'"'), "gray", "grey") {
+			local pal gs2 gs10 gs5 gs12 gs7 gs3 gs9 gs13 gs4 gs11 gs6 gs1 gs8 gs14 gs2
+			local syms O Dh T Sh X D Th S Oh + Dh Sh T O D
+			local gray 1
+		}
+		else local pal `"`colors'"'
+	}
 	local plots
 	local nplot 0
 	if "`noedges'" == "" & `m' > 0 {
-		if `"`edgecolor'"' == "" local edgecolor "gs11%60"
+		* dense networks: lighter lines and smaller arrowheads
+		local dense = (`m' > 400)
+		if `"`edgecolor'"' == "" local edgecolor = cond(`dense', "gs12%35", "gs11%60")
 		if `"`edgewidth'"' == "" local edgewidth "vthin"
-		if `usearrows' local plots `"(pcarrow ey1 ex1 ey2 ex2, lcolor(`edgecolor') mcolor(`edgecolor') lwidth(`edgewidth') barbsize(small))"'
+		if `"`arrowsize'"' == "" local arrowsize = cond(`dense', "vsmall", "small")
+		if `usearrows' local plots `"(pcarrow ey1 ex1 ey2 ex2, lcolor(`edgecolor') mcolor(`edgecolor') lwidth(`edgewidth') barbsize(`arrowsize'))"'
 		else local plots `"(pcspike ey1 ex1 ey2 ex2, lcolor(`edgecolor') lwidth(`edgewidth'))"'
 		local ++nplot
 	}
@@ -310,7 +346,17 @@ program nwlsmplot, rclass
 			local ++g
 			local pi = cond("`clusters'" != "", `v', `g')
 			local col : word `pi' of `pal2'
+			local sym
+			local lcl `col'
+			if `gray' {
+				local sym "msymbol(`: word `pi' of `syms'')"
+				local lcl black
+			}
 			local lab "`v'"
+			if "`clusters'" == "" {
+				local ci : list posof "`v'" in clv
+				if `ci' > 0 local lab `"`cl_`ci''"'
+			}
 			if "`certainty'" != "" {
 				local last
 				local bi 0
@@ -320,26 +366,26 @@ program nwlsmplot, rclass
 					if r(N) > 0 {
 						local ++nplot
 						local last `nplot'
-						local plots `"`plots' (scatter y x `wt' if cg == `v' & qb == `bi', mcolor(`col'%`op') mlabcolor(`col') `mopt')"'
+						local plots `"`plots' (scatter y x `wt' if cg == `v' & qb == `bi', mcolor(`col'%`op') mlabcolor(`lcl') `sym' `mopt')"'
 					}
 				}
 				local order `"`order' `last' "`lab'""'
 			}
 			else {
 				local ++nplot
-				local plots `"`plots' (scatter y x `wt' if cg == `v', mcolor(`col'%75) mlabcolor(`col') `mopt')"'
+				local plots `"`plots' (scatter y x `wt' if cg == `v', mcolor(`col'`=cond(`gray', "", "%75")') mlabcolor(`lcl') `sym' `mopt')"'
 				local order `"`order' `nplot' "`lab'""'
 			}
 		}
-		local legend `"legend(order(`order') position(3) cols(1) title("`color'", size(small)))"'
+		local legend `"legend(order(`order') position(3) cols(1) title(`"`cttl'"', size(small) color(black)))"'
 	}
 	else {
 		local plots `"`plots' (scatter y x `wt', mcolor(navy%75) mlabcolor(navy) `mopt')"'
 		local legend "legend(off)"
 	}
-	local ttl `"title("Latent positions")"'
+	local ttl `"title("Latent positions", color(black))"'
 	if strpos(`"`options'"', "title(") local ttl
-	local axopt `"xtitle("dimension `d1'") ytitle("dimension `d2'") xlabel(, grid) ylabel(, grid)"'
+	local axopt `"xtitle("dimension `d1'", color(black)) ytitle("dimension `d2'", color(black)) xlabel(, grid) ylabel(, grid)"'
 	if "`noaxes'" != "" local axopt `"xtitle("") ytitle("") xscale(off) yscale(off) xlabel(none) ylabel(none)"'
 	* equal scale: the same data range (plus the same padding) on both axes' range lengths, aspect ratio = y range / x range, so that one unit
 	* has the same length on x and y (distances are the content of a latent space; circles stay round)
@@ -387,7 +433,7 @@ program nwlsmplot, rclass
 			local yl `yl' `=`k' * `step''
 		}
 		local aspopt "aspectratio(`asp') xscale(range(`xlo' `xhi')) yscale(range(`ylo' `yhi'))"
-		if "`xl'" != "" & "`yl'" != "" & "`noaxes'" == "" local axopt `"xtitle("dimension `d1'") ytitle("dimension `d2'") xlabel(`xl', grid) ylabel(`yl', grid)"'
+		if "`xl'" != "" & "`yl'" != "" & "`noaxes'" == "" local axopt `"xtitle("dimension `d1'", color(black)) ytitle("dimension `d2'", color(black)) xlabel(`xl', grid) ylabel(`yl', grid)"'
 	}
 	if strpos(`"`options'"', "aspectratio(") | strpos(`"`options'"', "aspect(") local aspopt
 	* automatic label positions: for every actor the clock position (around the marker) with the fewest other markers and already placed labels under its label

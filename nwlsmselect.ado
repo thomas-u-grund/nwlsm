@@ -99,9 +99,9 @@ program nwlsmselect, rclass
 			local pl `"`pl' (connected BIC_effects clusters, lcolor(forest_green) mcolor(forest_green) msymbol(S) lpattern(dash))"'
 			local lg `"`lg' 4 "BIC of the random effects""'
 		}
-		local gtt `"title("BIC by number of latent clusters")"'
+		local gtt `"title("BIC by number of latent clusters", color(black))"'
 		if strpos(`"`gopts'"', "title(") local gtt
-		twoway `pl', xlabel(`xl') xtitle("Number of clusters (none = no clusters)") ytitle("BIC") xline(`bestG', lpattern(shortdash) lcolor(gs10)) ///
+		twoway `pl', xlabel(`xl') xtitle("Number of clusters (none = no clusters)", color(black)) ytitle("BIC", color(black)) xline(`bestG', lpattern(shortdash) lcolor(gs10)) ///
 			legend(order(`lg') position(6) rows(2) size(small)) `gtt' note("Dashed vertical line: smallest BIC (`bestG' clusters). Smaller is better.", size(vsmall)) ///
 			`=cond("`gname'" != "", "name(`gname', replace)", "")' `gopts'
 		restore

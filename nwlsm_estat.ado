@@ -236,12 +236,12 @@ program _nwlsm_mcmcdiag, rclass
 				local lines `lines' (line v`k'_`c' draw, lcolor(`col') lwidth(vthin))
 			}
 			local sub
-			if `C' > 1 local sub subtitle("Rhat = `: di %5.3f `R'[`k', 5]'", size(vsmall))
-			twoway `lines', title("`pn'", size(small)) `sub' xtitle("draw") ytitle("") legend(off) nodraw name(__lsmtr`k', replace)
+			if `C' > 1 local sub subtitle("Rhat = `: di %5.3f `R'[`k', 5]'", size(vsmall) color(black))
+			twoway `lines', title("`pn'", size(small) color(black)) `sub' xtitle("draw", color(black)) ytitle("", color(black)) legend(off) nodraw name(__lsmtr`k', replace)
 			local panels `panels' __lsmtr`k'
 		}
 		local cols = cond(`np' <= 4, 2, 3)
-		graph combine `panels', cols(`cols') title("`ttl'", size(medium)) name(`name', replace)
+		graph combine `panels', cols(`cols') title("`ttl'", size(medium) color(black)) name(`name', replace)
 		forvalues k = 1/`np' {
 			capture graph drop __lsmtr`k'
 		}
@@ -556,7 +556,7 @@ program _nwlsm_gof, rclass
 			local panels `panels' panel`np'
 		}
 		if `np' > 0 {
-			graph combine `panels', cols(`=min(`np', 2)') title("Goodness of fit: observed against `nsim' simulated networks", size(medium)) name(`name', replace)
+			graph combine `panels', cols(`=min(`np', 2)') title("Goodness of fit: observed against `nsim' simulated networks", size(medium) color(black)) name(`name', replace)
 			foreach pn of local panels {
 				capture graph drop `pn'
 			}
@@ -599,7 +599,7 @@ program _nwlsm_gofplot
 	}
 	twoway (rcap ymin ymax xval, lcolor(gs10)) (rbar yp25 yp75 xval, barwidth(0.5) fcolor(gs14) lcolor(gs8)) ///
 		(scatter ymedian xval, mcolor(black) msymbol(diamond)) (connected observed xval, lcolor(red) mcolor(red) msymbol(circle) lwidth(medthin)), ///
-		xlabel(`xlab', angle(45) labsize(vsmall)) xtitle("`ttl'") ytitle("Proportion") title("`ttl'", size(small)) legend(off) nodraw name(`graphname', replace)
+		xlabel(`xlab', angle(45) labsize(vsmall)) xtitle("`ttl'", color(black)) ytitle("Proportion", color(black)) title("`ttl'", size(small) color(black)) legend(off) nodraw name(`graphname', replace)
 	restore
 end
 
@@ -659,7 +659,7 @@ program _nwlsm_ppcheck, rclass
 		quietly summarize predicted, meanonly
 		local hi = max(`hi', r(max))
 		twoway (function y = x, range(`lo' `hi') lcolor(gs10) lpattern(dash)) (connected observed predicted, mcolor(navy) lcolor(navy) msymbol(circle)), ///
-			xtitle("Posterior mean prediction (group mean)") ytitle("Observed (group mean)") title("Posterior predictive check", size(medium)) legend(off) name(`name', replace)
+			xtitle("Posterior mean prediction (group mean)", color(black)) ytitle("Observed (group mean)", color(black)) title("Posterior predictive check", size(medium) color(black)) legend(off) name(`name', replace)
 		restore
 	}
 	return matrix groups = `T'
@@ -766,7 +766,7 @@ program _nwlsm_influence, rclass
 			rename c2 pred
 		}
 		twoway (scatter obs pred, mcolor(navy%70)) (function y = x, range(pred) lcolor(gs8) lpattern(dash)), ///
-			xtitle("predicted outcome (posterior mean)") ytitle("observed outcome") title("Latent space influence model: fit") legend(off) ///
+			xtitle("predicted outcome (posterior mean)", color(black)) ytitle("observed outcome", color(black)) title("Latent space influence model: fit", color(black)) legend(off) ///
 			name(`name', replace)
 		restore
 	}

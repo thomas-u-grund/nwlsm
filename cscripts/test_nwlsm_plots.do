@@ -156,4 +156,72 @@ nwlsmplot, draws(10) name(z1)
 assert _N == 7
 summarize x, meanonly
 assert r(sum) == 28
+
+* ---- labels, value-labelled legend, noarrows, gray palette, black titles (directed fit of the 18 monks)
+quietly nwlsm dir, dim(2) seed(3) nsample(300) burnin(300)
+quietly {
+	clear
+	set obs 18
+	gen byte grpn = 1 + (_n > 9)
+	label define fac_l 1 "Loyal" 2 "Turks"
+	label values grpn fac_l
+	label variable grpn "Faction"
+	gen byte plain = 1 + mod(_n, 3)
+}
+local tmpd "$LSM_SCRATCH"
+capture program drop lsmt_png
+program lsmt_png
+	args fn
+	quietly checksum "`fn'"
+	c_local cks = r(checksum)
+end
+* numeric label variable, with and without value labels
+nwlsmplot, label(grpn) name(lb1)
+lsmt_gexists lb1
+nwlsmplot, label(plain) name(lb2)
+lsmt_gexists lb2
+* color(): value labels in the legend (the legend text is in the graph; its file differs from the unlabelled variable's)
+nwlsmplot, color(grpn) name(vl1) export("`tmpd'/vl1.png")
+lsmt_gexists vl1
+quietly label drop fac_l
+nwlsmplot, color(grpn) name(vl2) export("`tmpd'/vl2.png")
+lsmt_gexists vl2
+lsmt_png "`tmpd'/vl1.png"
+local c1 `cks'
+lsmt_png "`tmpd'/vl2.png"
+if "`c1'" == "`cks'" {
+	di as error "FAIL: color() legend does not use the value labels"
+	exit 9
+}
+quietly label define fac_l 1 "Loyal" 2 "Turks"
+* noarrows works (no arrowheads: a different picture than the default arrows), arrows and noarrows cannot be combined
+nwlsmplot, export("`tmpd'/ar1.png") name(ar1)
+lsmt_png "`tmpd'/ar1.png"
+local c1 `cks'
+nwlsmplot, noarrows export("`tmpd'/ar2.png") name(ar2)
+lsmt_png "`tmpd'/ar2.png"
+if "`c1'" == "`cks'" {
+	di as error "FAIL: noarrows has no effect"
+	exit 9
+}
+capture nwlsmplot, arrows noarrows
+assert _rc == 198
+nwlsmplot, arrowsize(vsmall) name(as1)
+lsmt_gexists as1
+* colors(): gray and a colour list
+nwlsmplot, color(grpn) colors(gray) name(gr1) export("`tmpd'/gr1.png")
+lsmt_gexists gr1
+nwlsmplot, color(grpn) colors(red blue) name(gr2)
+lsmt_gexists gr2
+* black titles: the default title is black (the PNG has no navy title pixels: compare with an explicit navy title)
+nwlsmplot, noedges name(bt1) export("`tmpd'/bt1.png")
+nwlsmplot, noedges title("Latent positions", color(navy)) name(bt2) export("`tmpd'/bt2.png")
+lsmt_png "`tmpd'/bt1.png"
+local c1 `cks'
+lsmt_png "`tmpd'/bt2.png"
+if "`c1'" == "`cks'" {
+	di as error "FAIL: the default title colour is not distinguishable from navy"
+	exit 9
+}
+graph drop _all
 display "PASS test_nwlsm_plots: plot options (arrows, clustermeans, circles, draws, certainty, labels, noaxes, export) and nwlsmselect graph"
