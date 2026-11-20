@@ -5,9 +5,10 @@ capture program drop nwlsmplot
 program nwlsmplot, rclass
 	version 14
 	* Stata reads noarrows as the negation of arrows; a real option of its own is needed
-	local 0 = subinstr(`"`0'"', "noarrows", "arrowsoff", .)
+	_nwlsmplot_fixno `0'
+	local 0 `"`r(cmd)'"'
 	syntax [, DIMs(numlist integer min=2 max=2 >=1) MEAN COLor(varname) SIZE(string) LABel(varname) NOEDGES CLUSters ///
-		EDGEColor(string) EDGEWidth(string) MSIZE(string) NAME(string) ARRows ARROWSOFF ARROWSize(string) COLORS(string) CLUSTERMeans CIRCles DRAWs(integer 0) CERTainty ///
+		EDGEColor(string) EDGEWidth(string) MSIZE(string) NAME(string) ARRows ARROWSOFF ARROWSize(string) COLORS(string) Title(string asis) SUBtitle(string asis) CLUSTERMeans CIRCles DRAWs(integer 0) CERTainty ///
 		LABSize(string) LABPosition(string) NOAXes NOEQual EXPort(string asis) *]
 	if "`e(cmd)'" != "nwlsm" error 301
 	tempname Z E
@@ -131,6 +132,16 @@ program nwlsmplot, rclass
 	local clv
 	local cttl "`color'"
 	if "`color'" != "" & "`clusters'" == "" {
+		capture confirm string variable `color'
+		if !_rc {
+			* a string variable: encoded to a temporary numeric variable (alphabetical order), the strings are the legend labels
+			tempvar cenc
+			local cvlab0 : variable label `color'
+			quietly encode `color', generate(`cenc')
+			if `"`cvlab0'"' != "" label variable `cenc' `"`cvlab0'"'
+			local cttl "`color'"
+			local color "`cenc'"
+		}
 		quietly levelsof `color', local(clv)
 		local ci 0
 		foreach v of local clv {
@@ -383,8 +394,14 @@ program nwlsmplot, rclass
 		local plots `"`plots' (scatter y x `wt', mcolor(navy%75) mlabcolor(navy) `mopt')"'
 		local legend "legend(off)"
 	}
-	local ttl `"title("Latent positions", color(black))"'
-	if strpos(`"`options'"', "title(") local ttl
+	if `"`title'"' == "" local title `""Latent positions""'
+	_nwlsmplot_tt title `title'
+	local ttl `"`r(t)'"'
+	local stt
+	if `"`subtitle'"' != "" {
+		_nwlsmplot_tt subtitle `subtitle'
+		local stt `"`r(t)'"'
+	}
 	local axopt `"xtitle("dimension `d1'", color(black)) ytitle("dimension `d2'", color(black)) xlabel(, grid) ylabel(, grid)"'
 	if "`noaxes'" != "" local axopt `"xtitle("") ytitle("") xscale(off) yscale(off) xlabel(none) ylabel(none)"'
 	* equal scale: the same data range (plus the same padding) on both axes' range lengths, aspect ratio = y range / x range, so that one unit
@@ -499,7 +516,7 @@ program nwlsmplot, rclass
 			}
 		}
 	}
-	twoway `plots', `axopt' `ttl' `aspopt' `legend' ///
+	twoway `plots', `axopt' `ttl' `stt' `aspopt' `legend' ///
 		`=cond("`name'" != "", "name(`name', replace)", "")' `options'
 	if `"`export'"' != "" {
 		gettoken __fn __ex : export, parse(",")
@@ -514,4 +531,51 @@ program nwlsmplot, rclass
 		return scalar ymax = `yhi'
 	}
 	restore
+end
+
+
+* title()/subtitle(): black text unless the user's own text already carries a color() option; title("") draws no title
+capture program drop _nwlsmplot_tt
+program _nwlsmplot_tt, rclass
+	gettoken kind t : 0
+	mata: st_local("t", strtrim(st_local("t")))
+	mata: st_local("hasq", strofreal(strpos(st_local("t"), char(34)) > 0))
+	if !`hasq' local t `""`t'""'
+	if strpos(`"`t'"', "color(") | strpos(`"`t'"', "col(") return local t `"`kind'(`t')"'
+	else {
+		mata: st_local("hasopt", strofreal(strpos(st_local("t"), char(34) + ",") > 0 | strpos(st_local("t"), char(34) + " ,") > 0))
+		if `hasopt' return local t `"`kind'(`t' color(black))"'
+		else return local t `"`kind'(`t', color(black))"'
+	}
+end
+
+* noarrows -> arrowsoff, only where it stands as a whole option word outside double quotes
+capture program drop _nwlsmplot_fixno
+program _nwlsmplot_fixno, rclass
+	local s `"`0'"'
+	local n = strlen(`"`s'"')
+	local out
+	local inq 0
+	local i 1
+	while `i' <= `n' {
+		local cc = substr(`"`s'"', `i', 1)
+		if strpos(`"`cc'"', char(34)) {
+			local inq = 1 - `inq'
+			local out `"`out'`cc'"'
+			local ++i
+			continue
+		}
+		if !`inq' & substr(`"`s'"', `i', 8) == "noarrows" {
+			local pv = cond(`i' == 1, " ", substr(`"`s'"', `i' - 1, 1))
+			local nx = cond(`i' + 8 > `n', " ", substr(`"`s'"', `i' + 8, 1))
+			if inlist("`pv'", " ", ",", char(9)) & inlist("`nx'", " ", ",", char(9)) {
+				local out `"`out'arrowsoff"'
+				local i = `i' + 8
+				continue
+			}
+		}
+		local out `"`out'`cc'"'
+		local ++i
+	}
+	return local cmd `"`out'"'
 end

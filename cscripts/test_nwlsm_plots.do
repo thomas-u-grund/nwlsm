@@ -232,4 +232,47 @@ capture erase "`tmpd'/eo2.png"
 nwlsmplot, name(eo2) export(`tmpd'/eo2.png, width(500))
 confirm file "`tmpd'/eo2.png"
 graph drop _all
+* ---- color() with a string variable (alphabetical order, strings in the legend); user titles black; noarrows only as an option word
+quietly {
+	clear
+	set obs 18
+	gen str8 sgrp = cond(_n <= 9, "Turks", "Loyal")
+	label variable sgrp "Faction"
+}
+nwlsmplot, color(sgrp) name(sc1) export("`tmpd'/sc1.png")
+lsmt_gexists sc1
+* a string variable gives the same picture as its encoded twin with the same labels
+quietly encode sgrp, generate(sgrpn)
+label variable sgrpn "Faction"
+nwlsmplot, color(sgrpn) name(sc2) export("`tmpd'/sc2.png")
+lsmt_png "`tmpd'/sc1.png"
+local c1 `cks'
+lsmt_png "`tmpd'/sc2.png"
+if "`c1'" != "`cks'" {
+	di as error "FAIL: color(string variable) differs from color(encoded variable)"
+	exit 9
+}
+* the user's title is black like the default; the same with an explicit color(black), different with color(navy)
+nwlsmplot, noedges title("My title") export("`tmpd'/ut1.png") name(ut1)
+nwlsmplot, noedges title("My title", color(black)) export("`tmpd'/ut2.png") name(ut2)
+nwlsmplot, noedges title("My title", color(navy)) export("`tmpd'/ut3.png") name(ut3)
+nwlsmplot, noedges title("My title") subtitle("sub") export("`tmpd'/ut4.png") name(ut4)
+nwlsmplot, noedges title("My title") subtitle("sub", color(black)) export("`tmpd'/ut5.png") name(ut5)
+foreach f in 1 2 3 4 5 {
+	lsmt_png "`tmpd'/ut`f'.png"
+	local u`f' `cks'
+}
+if "`u1'" != "`u2'" | "`u1'" == "`u3'" | "`u4'" != "`u5'" {
+	di as error "FAIL: user title/subtitle colour"
+	exit 9
+}
+nwlsmplot, noedges title("") name(ut6)
+lsmt_gexists ut6
+* noarrows is rewritten only as an option word, never inside a quoted string
+capture erase "`tmpd'/x_noarrows.png"
+nwlsmplot, noarrows export("`tmpd'/x_noarrows.png") title("noarrows") name(na1)
+confirm file "`tmpd'/x_noarrows.png"
+nwlsmplot, noarrows title("noarrows, not an option") name(na2)
+lsmt_gexists na2
+graph drop _all
 display "PASS test_nwlsm_plots: plot options (arrows, clustermeans, circles, draws, certainty, labels, noaxes, export) and nwlsmselect graph"
