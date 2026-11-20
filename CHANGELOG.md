@@ -1,5 +1,9 @@
 # Changelog
 
+## [Unreleased]
+- Dialogs: `nwlsm_estat.dlg` has a field for the graph name (`name()`) of the graphs of `estat mcmcdiag`, `gof`, `ppcheck` and `influence`; `nwlsmselect.dlg` has a field for the graph options (`gopts()`).
+- The dialog test `tools/dlg_assembly_test.py` checks the command that `nwlsmplot.dlg`, `nwlsm_estat.dlg` and `nwlsmselect.dlg` build; `cscripts/test_dlg_plots.do` runs the command lines of the graph options.
+
 ## [1.0.0] - 2026-11-20
 - `nwlsmplot`: `color()` accepts a string variable (groups in alphabetical order, the strings in the legend); a `title()` or `subtitle()` you give is black like the default unless it carries its own `color()`; `noarrows` is recognised only as an option word (a file name such as `export(x_noarrows.png)` or a title text containing "noarrows" is left alone). Tests in `cscripts/test_nwlsm_plots.do`.
 - Plots (`nwlsmplot`, `nwlsmselect, graph`, the graphs of `estat`): titles, subtitles, axis titles and legend titles are black by default (a twoway option still overrides). `nwlsmplot`: `label()` takes a numeric variable too (value labels, else the numbers); the legend of `color()` shows the value labels of the variable and its variable label as the legend title; `noarrows` works now (Stata read it as the negation of `arrows`; it is parsed as an option of its own); `arrowsize()`; dense networks (more than 400 ties) get lighter tie lines and smaller arrowheads by default; `colors()` (a colour list, or `gray`: gray values and filled/hollow marker symbols for black-and-white print). Tests in `cscripts/test_nwlsm_plots.do`.

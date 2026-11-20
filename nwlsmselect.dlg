@@ -34,6 +34,8 @@ BEGIN
   CHECKBOX cx_gr 20 188 300 ., label("draw the graph") onclickon(script gr_on) onclickoff(script gr_off)
   TEXT tx_gn 20 216 120 ., label("Graph name:")
   EDIT ed_gn 150 216 150 ., nomem
+  TEXT tx_go 320 216 110 ., label("Graph options:")
+  EDIT ed_go 430 216 150 ., nomem
   GROUPBOX gb_mod 10 262 580 118, label("Options of every nwlsm fit")
   TEXT tx_dim 20 282 260 ., label("Latent dimensions:")
   SPINNER sp_dim 290 282 70 ., default(2) min(1) max(10) nomem
@@ -71,11 +73,15 @@ SCRIPT gr_on
 BEGIN
 	main.tx_gn.enable
 	main.ed_gn.enable
+	main.tx_go.enable
+	main.ed_go.enable
 END
 
 SCRIPT gr_off
 BEGIN
 	main.tx_gn.disable
+	main.tx_go.disable
+	main.ed_go.disable
 	main.ed_gn.disable
 END
 
@@ -114,6 +120,9 @@ BEGIN
 		put " graph"
 		if main.ed_gn.isneq("") {
 			put " gname(" main.ed_gn ")"
+		}
+		if main.ed_go.isneq("") {
+			put " gopts(" main.ed_go ")"
 		}
 	}
 	if !main.sp_dim.isdefault() {
