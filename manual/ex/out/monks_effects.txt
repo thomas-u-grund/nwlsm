@@ -1,0 +1,143 @@
+. nwlsmselect choice3, clusters(0 2 3 4) sender receiver seed(12)
+
+Selection of the number of latent clusters by BIC (as latentnet's bic.ergmm), network choi
+> ce3
+------------------------------------------------------------------------
+  Clusters         BIC     BIC (Y)     BIC (Z) Mean loglik   BIC - min
+------------------------------------------------------------------------
+         3     287.176     160.828     108.071     -90.822       0.000  <- best
+         4     287.485     160.870     109.345     -90.826       0.309
+         2     301.541     161.693     117.032     -90.879      14.366
+         0     372.325     154.757     156.427     -88.249      85.149
+------------------------------------------------------------------------
+Sorted by BIC, smaller is better; 0 clusters is the model without clusters. The BIC
+compares fits to the same network with the same options.
+
+. nwlsm choice3, dim(2) clusters(3) sender receiver seed(12)
+------------------------------------------------------------------------------
+Latent space model (Euclidean distance; bernoulli family), posterior by MCMC
+Network: choice3 (18 actors, directed)             Latent dimensions: 2
+Draws: 4000  burn-in: 10000  interval: 10          Seed: 12
+Latent clusters: 3
+Posterior mean log likelihood:   -90.822 (sd  5.359)
+------------------------------------------------------------------------------
+                              Mean        Sd   MC s.e.  Lower 95% Upper 95%
+------------------------------------------------------------------------------
+_cons                       1.5618    0.5476    0.0317     0.5457    2.7273
+------------------------------------------------------------------------------
+Variance parameters (posterior):
+sigma2_1                    1.1270    1.1999    0.0439     0.2202    4.3803
+sigma2_2                    1.5081    1.6828    0.0573     0.2430    5.5665
+sigma2_3                    1.7161    2.2383    0.0731     0.2083    7.3680
+sender_var                  0.4645    0.2232    0.0046     0.1886    1.0298
+receiver_var                0.9569    0.5685    0.0136     0.2992    2.3468
+------------------------------------------------------------------------------
+Acceptance rate of the latent positions: 0.262
+Latent clusters: estat clusters lists the posterior membership probabilities and the
+classification; cluster means e(cmeans), mixing proportions e(lambda).
+Positions: minimum Kullback-Leibler estimate e(Z) (also estat positions); mean of the
+draws aligned to it e(Zmean); posterior mean distances e(D); posterior mean tie
+probabilities e(P). Positions are identified up to rotation, reflection and translation
+only.
+
+. estat bic
+
+BIC of the latent position model (as latentnet's bic.ergmm)
+--------------------------------------------
+Component                                BIC
+--------------------------------------------
+Ties given positions (Y)             160.828
+Positions (Z)                        108.071
+Random effect: sender                 -8.749
+Random effect: receiver               27.025
+--------------------------------------------
+Overall                              287.176
+--------------------------------------------
+Latent clusters: 3; coefficients: 1; effective number of observations (ties): 56
+Smaller is better. The BIC compares models fitted to the same network; it is not certain
+that it is appropriate for choosing the dimension, the random effects or between a
+clustered and an unclustered model.
+
+. display "starting points of the minimum Kullback-Leibler fit: " e(mklstarts)
+starting points of the minimum Kullback-Leibler fit: 4
+
+. nwlsm choice3, dim(2) clusters(3) sender receiver seed(12) mklstarts(1)
+------------------------------------------------------------------------------
+Latent space model (Euclidean distance; bernoulli family), posterior by MCMC
+Network: choice3 (18 actors, directed)             Latent dimensions: 2
+Draws: 4000  burn-in: 10000  interval: 10          Seed: 12
+Latent clusters: 3
+Posterior mean log likelihood:   -90.822 (sd  5.359)
+------------------------------------------------------------------------------
+                              Mean        Sd   MC s.e.  Lower 95% Upper 95%
+------------------------------------------------------------------------------
+_cons                       1.5618    0.5476    0.0317     0.5457    2.7273
+------------------------------------------------------------------------------
+Variance parameters (posterior):
+sigma2_1                    1.1270    1.1999    0.0439     0.2202    4.3803
+sigma2_2                    1.5081    1.6828    0.0573     0.2430    5.5665
+sigma2_3                    1.7161    2.2383    0.0731     0.2083    7.3680
+sender_var                  0.4645    0.2232    0.0046     0.1886    1.0298
+receiver_var                0.9569    0.5685    0.0136     0.2992    2.3468
+------------------------------------------------------------------------------
+Acceptance rate of the latent positions: 0.262
+Latent clusters: estat clusters lists the posterior membership probabilities and the
+classification; cluster means e(cmeans), mixing proportions e(lambda).
+Positions: minimum Kullback-Leibler estimate e(Z) (also estat positions); mean of the
+draws aligned to it e(Zmean); posterior mean distances e(D); posterior mean tie
+probabilities e(P). Positions are identified up to rotation, reflection and translation
+only.
+
+. estat bic
+
+BIC of the latent position model (as latentnet's bic.ergmm)
+--------------------------------------------
+Component                                BIC
+--------------------------------------------
+Ties given positions (Y)             160.828
+Positions (Z)                        108.071
+Random effect: sender                 -8.749
+Random effect: receiver               27.025
+--------------------------------------------
+Overall                              287.176
+--------------------------------------------
+Latent clusters: 3; coefficients: 1; effective number of observations (ties): 56
+Smaller is better. The BIC compares models fitted to the same network; it is not certain
+that it is appropriate for choosing the dimension, the random effects or between a
+clustered and an unclustered model.
+
+. estat bic, effobs(dyads)
+
+BIC of the latent position model (as latentnet's bic.ergmm)
+--------------------------------------------
+Component                                BIC
+--------------------------------------------
+Ties given positions (Y)             162.527
+Positions (Z)                        108.071
+Random effect: sender                 -8.749
+Random effect: receiver               27.025
+--------------------------------------------
+Overall                              288.874
+--------------------------------------------
+Latent clusters: 3; coefficients: 1; effective number of observations (dyads): 306
+Smaller is better. The BIC compares models fitted to the same network; it is not certain
+that it is appropriate for choosing the dimension, the random effects or between a
+clustered and an unclustered model.
+
+. estat bic, effobs(actors)
+
+BIC of the latent position model (as latentnet's bic.ergmm)
+--------------------------------------------
+Component                                BIC
+--------------------------------------------
+Ties given positions (Y)             159.693
+Positions (Z)                        108.071
+Random effect: sender                 -8.749
+Random effect: receiver               27.025
+--------------------------------------------
+Overall                              286.041
+--------------------------------------------
+Latent clusters: 3; coefficients: 1; effective number of observations (actors): 18
+Smaller is better. The BIC compares models fitted to the same network; it is not certain
+that it is appropriate for choosing the dimension, the random effects or between a
+clustered and an unclustered model.

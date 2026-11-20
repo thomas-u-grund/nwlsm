@@ -1,0 +1,38 @@
+. quietly nwlsm lazega_fr, dim(2) seed(12)
+
+. estimates store d2
+
+. quietly nwlsm lazega_fr, dim(3) seed(12)
+
+. estimates store d3
+
+. quietly nwlsm lazega_fr, dim(2) absdiff(seniority) seed(12)
+
+. estimates store d2sen
+
+. quietly nwlsm lazega_fr, dim(2) sender receiver seed(12)
+
+. estimates store d2sr
+
+. nwcompare d2 d3 d2sen d2sr
+
+Fit statistics of stored estimation results
+------------------------------------------------------------------------------
+Model       Command  Network        N   k  log lik.     AIC      BIC      ICL
+------------------------------------------------------------------------------
+d2          nwlsm    lazega_fr   4970   1  -1551.0        .        .        .
+d3          nwlsm    lazega_fr   4970   1  -1503.5        .        .        .
+d2sen       nwlsm    lazega_fr   4970   2  -1548.0        .        .        .
+d2sr        nwlsm    lazega_fr   4970   1  -1486.3        .        .        .
+------------------------------------------------------------------------------
+d2: log likelihood is the posterior mean over the draws; no AIC or BIC (Bayesian fit); N
+  is the number of dyads.
+d3: log likelihood is the posterior mean over the draws; no AIC or BIC (Bayesian fit); N
+  is the number of dyads.
+d2sen: log likelihood is the posterior mean over the draws; no AIC or BIC (Bayesian
+  fit); N is the number of dyads.
+d2sr: log likelihood is the posterior mean over the draws; no AIC or BIC (Bayesian fit);
+  N is the number of dyads.
+Criteria of different model families (ERGM, latent space, block model) are not always
+  comparable: they are built on different likelihoods and different observation counts.
+  Compare within a family first.

@@ -1,0 +1,27 @@
+. quietly nwlsm zachary_bin, dim(2) seed(5) nsample(500) burnin(2000) savedraws(draws_kara
+> te.dta)
+
+. preserve
+
+. use draws_karate.dta, clear
+
+. describe, short
+
+Contains data from draws_karate.dta
+ Observations:           500
+    Variables:             3                  20 Nov 2026 14:41
+Sorted by:
+
+. summarize beta_cons loglik, separator(0)
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+   beta_cons |        500      1.0381    .3440162   .1288406   1.871428
+      loglik |        500   -170.9509    7.938084  -203.5783  -151.7233
+
+. restore
+
+. mata: st_numscalar("nd", rows(LsmSample("beta")))
+
+. display "draws of beta in Mata: " nd
+draws of beta in Mata: 500

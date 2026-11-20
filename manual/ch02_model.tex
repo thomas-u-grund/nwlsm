@@ -1,0 +1,42 @@
+\chapter{The model}\label{ch:model}
+
+\section{The tie model}\label{sec:tiemodel}
+
+Let $y_{ij}$ be the tie from actor $i$ to actor $j$ (for an undirected network each pair counts once; self-loops are ignored, and ties with a missing value are left out of the likelihood). Every actor $i$ has a position $z_i\in\mathbb{R}^d$, $d=1,\dots,10$. For binary ties (the default family, \texttt{bernoulli}) the log odds of a tie are
+\begin{equation}
+\operatorname{logit} P(y_{ij}=1)=\beta_0+\beta_1x_{ij1}+\dots+\beta_kx_{ijk}+s_i+r_j+o_i+o_j-\lVert z_i-z_j\rVert ,
+\end{equation}
+where $x_{ijm}$ are edge covariates, $s_i$, $r_j$ and $o_i$ are the optional random sender, receiver and sociality effects, and $\lVert\cdot\rVert$ is the Euclidean distance. With the option \opt{bilinear} the distance is replaced by the inner product $z_i'z_j$, which is \emph{added} to the log odds. Actors that are close in the latent space, or that point in the same direction in the bilinear model, are more likely to be tied. Given the positions, the ties are independent.
+
+\paragraph{Valued networks.} With \opt{family()} the values of the ties are modelled instead of their presence. The linear predictor $\eta_{ij}$, the right-hand side of the equation above, is the same in all families; the families differ in how the value depends on it: \texttt{poisson}, $y_{ij}\sim\text{Poisson}(\exp\eta_{ij})$; \texttt{binomial}, $y_{ij}\sim\text{Binomial}(m_{ij},\text{logistic}(\eta_{ij}))$ with $m_{ij}$ trials; \texttt{normal}, $y_{ij}\sim N(\eta_{ij},\tau^2)$ with a dispersion $\tau^2$ (Chapter~\ref{ch:valued}).
+
+\section{Priors}
+
+The defaults are those of \latentnet{}. The coefficients have independent normal priors with mean 0 and variance 9; for a covariate the variance is 9 divided by the mean square of the covariate over the dyads. The positions are $z_i\sim N(0,\sigma^2I)$, and $\sigma^2$ has a scaled inverse chi-squared prior with scale $0.125\,n^{2/d}$ and $\sqrt n$ degrees of freedom, where $n$ is the number of actors. A random effect is normal with mean 0 and its own variance; that variance has a scaled inverse chi-squared prior with scale 1 and 3 degrees of freedom unless \opt{sendervar()} and the options like it say otherwise. The prior of the positions pulls toward a common spread, so the intercept and the spread of the positions are only weakly identified in small or sparse networks; posterior means of the intercept can then differ from the values used to simulate a network, exactly as in \latentnet{}. A sender, a receiver and a sociality effect together with the intercept are not separately identified by the likelihood; the proper priors of the random effects identify them.
+
+\section{Latent clusters}
+
+With \opt{clusters(G)} the single normal distribution of the positions is replaced by a mixture of $G$ spherical normal distributions: $z_i\sim N(\mu_g,\sigma_g^2I)$ for actor $i$ in cluster $g$, $\mu_g\sim N(0,\omega^2I)$, a scaled inverse chi-squared prior for $\sigma_g^2$, and mixing proportions with a Dirichlet prior (Handcock, Raftery and Tantrum~\cite{handcock2007}). The defaults follow \latentnet{}: scale $0.125\,(n/G)^{2/d}$ and $\sqrt{n/G}$ degrees of freedom for the cluster variances, $\omega^2=2\times 0.125\,n^{2/d}$, and Dirichlet parameter $\sqrt{n/G}$. The memberships are sampled together with the other parameters. The labels of the clusters are arbitrary in every draw; they are corrected by permuting the labels of each draw to agree as well as possible with the posterior membership probabilities.
+
+\section{What the sampler does}\label{sec:sampler}
+
+The posterior is sampled by MCMC in the plugin. One sweep updates every position once (a random-walk Metropolis--Hastings step for one actor at a time), then every random effect (one at a time), then every coefficient, then the variances; the variances of the positions and of the random effects have Gibbs updates, and so has the dispersion of the normal family. The step sizes of the random-walk proposals are tuned in \opt{pilot()} runs of \opt{plen()} sweeps toward an acceptance rate of 0.234 (the rate that makes a random-walk sampler efficient~\cite{roberts1997}) and are then held fixed during the burn-in and the sampling. Every \opt{interval()}th sweep after the burn-in is kept.
+
+The start positions come from classical multidimensional scaling of the shortest-path distances between the actors (disconnected pairs get the largest distance plus one) and the start coefficients from a logit regression given those distances, unless \opt{randomstart} is given. The random effects start at 0. For a valued network the start positions come from a dissimilarity made from the values and the coefficients from a generalized linear model of the family.
+
+\section{The reported positions}\label{sec:mkl}
+
+The positions are identified only up to rotation, reflection and translation (in the bilinear model only up to rotation and reflection), so that the mean of the draws of a position is meaningless. \nwlsm{} reports, as \latentnet{} does, the \emph{minimum Kullback--Leibler} (MKL) positions of Handcock, Raftery and Tantrum~\cite{handcock2007}: the positions, coefficients and random effects that maximise the likelihood of the posterior mean tie probabilities, so that the fitted tie probabilities are as close as possible, in the Kullback--Leibler sense, to the posterior mean probabilities. They are stored in \texttt{e(Z)}. The optimisation is done in the plugin by a limited-memory BFGS method and starts from the draw whose tie probabilities are closest to the posterior mean probabilities, as in \latentnet{}. The mean of the draws, each aligned to the MKL positions by Procrustes analysis (rotation and reflection, no scaling), is \texttt{e(Zmean)}; it is shrunken toward the centre. The matrix of posterior mean distances between the actors, \texttt{e(D)}, does not depend on the rotation, and \texttt{e(P)} is the matrix of posterior mean tie probabilities.
+
+\section{Differences from \texorpdfstring{\latentnet}{latentnet}}\label{sec:deviations}
+
+The following differences are deliberate and documented.
+\begin{itemize}[nosep]
+  \item \textbf{Starts of the MKL fit.} The MKL objective can have several local optima. \opt{mklstarts(\#)} starts the optimisation from the \# draws closest to the posterior mean and keeps the best result. The default is 1, as in \latentnet{}, but 4 when the model has \opt{sender}, \opt{receiver} or \opt{sociality}: the estimates of weakly identified random effects have two local optima, and one start can end in the poorer one, which inflates the random-effect parts of the BIC (Chapter~\ref{ch:validation}).
+  \item \textbf{A weak ridge.} The MKL fit carries a very weak penalty on the positions and the random effects (one thousandth of the posterior precision) that keeps the optimiser from running away along directions in which the likelihood is flat. \latentnet{} has no such penalty.
+  \item \textbf{Cluster results.} The classification, the cluster means and the mixing proportions reported after \opt{clusters()} are label-corrected and aligned posterior means of the draws; they are not the mixture fitted to the positions by \latentnet{}'s MKL procedure.
+  \item \textbf{Goodness of fit of undirected networks.} \latentnet{}'s \texttt{simulate()} draws an undirected network by drawing every ordered pair and keeping a tie if either draw is a tie, so that its simulated undirected networks are too dense and its undirected \texttt{gof()} is biased. \texttt{estat gof} draws one value for every pair. For directed networks the simulation agrees with \latentnet{}'s.
+  \item \textbf{BIC.} The EM fit of the mixture in \texttt{estat bic} starts from the best of 15 $k$-means solutions with a fixed internal seed and can end in a different local maximum than \latentnet{}'s.
+  \item \textbf{Parallel chains.} Chains and threads are built into the plugin (Section~\ref{sec:chains}).
+\end{itemize}
+The influence model has its own deviations from the paper of Sweet and Adhikari (Chapter~\ref{ch:influence}).

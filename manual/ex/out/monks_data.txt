@@ -1,0 +1,35 @@
+. nwwebuse sampson, nwclear
+
+. nwsummarize samplk3
+--------------------------------------------------
+   Network name:  samplk3
+   Network id:  3
+   Directed: true
+   Valued: true
+   Two-mode: false
+   Nodes: 18
+   Selfloop: false
+   Arcs: 56
+   Minimum value:  0
+   Maximum value:  3
+   Density:  .183
+   Mean outdegree:  3.11
+   Temporal: false
+
+. nwgen choice3 = samplk3 > 0
+
+. nwsummarize choice3
+--------------------------------------------------
+   Network name:  choice3
+   Network id:  5
+   Directed: true
+   Valued: false
+   Two-mode: false
+   Nodes: 18
+   Selfloop: false
+   Arcs: 56
+   Minimum value:  0
+   Maximum value:  1
+   Density:  .183
+   Mean outdegree:  3.11
+   Temporal: false

@@ -1,0 +1,33 @@
+. nwlsm sim, dim(2) influence(y ylag x) neighbors(8) chains(2) nsample(2000) burnin(5000)
+> seed(20261120)
+------------------------------------------------------------------------------
+Latent space model for social influence (Euclidean distance; bernoulli family), posterior
+> by MCMC
+Network: sim (60 actors, directed)                 Latent dimensions: 2
+Draws: 2000  burn-in: 5000  interval: 10           Seed: 20261120
+Chains: 2 (1000 draws each, pooled)
+Posterior mean log likelihood: -1863.051 (sd  7.983)  outcome:   -27.322
+------------------------------------------------------------------------------
+                              Mean        Sd   MC s.e.  Lower 95% Upper 95%
+------------------------------------------------------------------------------
+Network (ties)
+_cons                       1.4620    0.0937    0.0055     1.2853    1.6435
+------------------------------------------------------------------------------
+Outcome: y (weights: invdist, 8 nearest actors)
+_cons                       0.4484    0.0662    0.0021     0.3177    0.5776
+ylag                        0.5433    0.0757    0.0031     0.3884    0.6919
+x                          -0.3264    0.0832    0.0024    -0.4918   -0.1675
+influence                   1.1514    0.1873    0.0071     0.7856    1.5336
+------------------------------------------------------------------------------
+Variance parameters (posterior):
+sigma2                      2.2934    0.3246    0.0102     1.7293    3.0050
+sigma2_y                    0.1555    0.0593    0.0027     0.0621    0.2868
+------------------------------------------------------------------------------
+Acceptance rate of the latent positions: 0.233
+Gelman-Rubin statistic: largest value  1.004 (see estat mcmcdiag)
+Influence model: estat influence gives the influence effect, predictions and the actors
+who exert most influence; weights e(W).
+Positions: minimum Kullback-Leibler estimate e(Z) (also estat positions); mean of the
+draws aligned to it e(Zmean); posterior mean distances e(D); posterior mean tie
+probabilities e(P). Positions are identified up to rotation, reflection and translation
+only.

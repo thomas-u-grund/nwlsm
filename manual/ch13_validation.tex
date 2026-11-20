@@ -1,0 +1,51 @@
+\chapter{Validation}\label{ch:validation}
+
+This chapter lists what the package was checked against. The reference for the tie model is the R package \latentnet{}, version 2.12.0~\cite{latentnetpkg}; the checks of the influence model are simulations from the exact model of the paper and a comparison with a fixed-network exposure model. Every check is part of the test suite of the package; the criteria below are those the tests assert. MCMC is noisy, so a comparison with \latentnet{} asks for agreement within Monte Carlo error, not for equal numbers.
+
+\section{Likelihoods and updates}
+
+The log likelihood computed in the plugin equals a direct recomputation in Mata, and the incremental changes of the log likelihood of a one-actor update and of a one-effect update (the quantities in the Metropolis acceptance ratios) equal the differences of two full recomputations. The analytic gradient of the minimum Kullback--Leibler objective equals a central difference. These checks run on random states, directed and undirected, with one, two and three latent dimensions, covariates, missing ties, sender, receiver and sociality effects, and the Euclidean and the bilinear term. For the influence model the log likelihood of the outcomes, the weights and the incremental updates are checked against direct computations in the same way.
+
+\section{Agreement with latentnet}
+
+Reference results were produced with \latentnet{} (two chains per case for the models with effects, valued networks and clusters, one chain per case for the basic model) and compared with several chains of \nwlsm{}. The networks are Sampson's monks (directed), random networks of 25 to 45 actors with and without a node covariate, and networks with planted clusters. The criteria, as the tests assert them, are:
+\begin{itemize}[nosep]
+  \item the posterior mean of every coefficient and variance parameter, averaged over the seeds, lies within 3.5 to 4 Monte Carlo standard errors of the value of \latentnet{}, where the standard error combines the batch-means error of \nwlsm{} and an error for the reference taken from the difference of its chains;
+  \item the posterior mean log likelihood lies within 2 posterior standard deviations of that of \latentnet{};
+  \item the posterior mean distance matrices correlate at least 0.98 with those of \latentnet{}, the posterior mean tie probabilities (off-diagonal) at least 0.995 with a mean absolute difference below 0.01, the posterior mean effects at least 0.97, and the pairwise distances of the minimum Kullback--Leibler positions at least 0.98 (0.90 in the sparse basic cases, whose MKL objective has several local optima);
+  \item for the valued families (Poisson, binomial with a number of trials and normal, directed and undirected) the same criteria hold, with the dispersion of the normal family included, and the minimum Kullback--Leibler objective of \nwlsm{} is not below the objective at \latentnet{}'s own MKL parameters evaluated on the same expected values;
+  \item for the latent clusters, the adjusted Rand index of the posterior classification with the planted clusters, and with the classification of \latentnet{}, is at least 0.9 in every run, and the coefficients agree as above; the same holds with several chains and threads.
+\end{itemize}
+
+\paragraph{Goodness of fit.} The statistics of the \emph{observed} network (degrees, edgewise and dyadwise shared partners, geodesic distances) are identical cell by cell to those of \latentnet{}'s \texttt{gof()} on three fits. The means of the simulated statistics (500 networks, one per posterior draw) agree with \latentnet{}'s mean over its 1,000 simulated networks within 4 standard errors of the difference in every cell with a positive standard deviation, and correlate with it at least 0.99 across the cells of every statistic. The statistics of an observed valued network are equal to an independent computation in Mata, and the mean total value of the simulated networks equals the sum of the posterior mean expected values within 3\%. The exception is the undirected simulation of \latentnet{} (Section~\ref{sec:deviations}), where \nwlsm{} deliberately differs.
+
+\paragraph{BIC.} The components of \texttt{estat bic} computed from \latentnet{}'s own minimum Kullback--Leibler positions and effects are identical to those of \latentnet{}'s \texttt{bic.ergmm()} (the part for the ties, the parts of the effects and the part for the positions without clusters to $10^{-3}$) on Sampson's monks (directed) and a planted-cluster network (undirected). In complete fits, where the positions and effects are those of \nwlsm{}'s own fit, the overall BIC differs from \latentnet{}'s by at most 0.5\%, and the ranking over the number of clusters is the same. For Sampson's monks the values of \nwlsm{} and \latentnet{} are 382.2 and 382.7 without clusters, 373.8 and 372.6 with two, and 337.7 and 336.8 with three clusters; for the planted-cluster network 833.8 and 833.6, 776.6 and 777.3, and 654.1 and 656.9 for three numbers of clusters.
+
+\paragraph{Known differences.} With four clusters on the planted-cluster network the EM fit of the mixture in \nwlsm{} ended in a better local maximum than \latentnet{}'s (positions part 219.6 against 228.5 on \latentnet{}'s own positions). With sender and receiver effects the minimum Kullback--Leibler fit of the monk network has two local optima (sender and receiver effects of about 0.27 and 0.68 standard deviation, BIC about 398 to 402; or about 0.65 and 0.75, BIC about 440): \latentnet{} ends in the second in 3 of 12 seeds, and \nwlsm{} with one start in 3 of 8 seeds. The first optimum has the higher objective, and 4 starts find it in all 16 seeds tried (2 starts: 14 of 16, 3 starts: 15 of 16). This is the reason for the default of 4 starts with random effects (Section~\ref{sec:deviations}); the BIC of the monk network with effects is then 396.9 to 399.5 against \latentnet{}'s 399.2.
+
+\section{Recovery of known parameters}
+
+Networks were simulated from known coefficients and positions and refitted. The tests assert that the 95\% intervals cover the true coefficients and the dispersion, and that the posterior mean distances correlate with the true distances: for undirected networks of 60 actors with a node covariate, a directed network of 50 actors with an edge covariate, and a three-dimensional case; for valued networks (Poisson, binomial with 7 trials, normal with a sociality effect, Poisson with sender and receiver effects and the bilinear term) with a correlation of at least 0.9; and with random effects (true standard deviations 0.8 and 0.6), where the posterior mean effects correlate at least 0.7 with the true effects and the intervals of the variances contain the true variances. The bilinear model recovers the inner products.
+
+\section{The influence model}
+
+The model was fitted to data simulated from the exact model of the paper, 30 replications per scenario, with 95\% posterior intervals; ties by latent distance, the outcome by the weighted lagged outcomes, true influence effect 1.
+
+\begin{center}\footnotesize\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lccccc@{}}
+\toprule Scenario & Cover. infl. & Mean (sd) & Cover. others & Cover. $\sigma_y^2$ & Dist. corr. \\ \midrule
+$n=50$, 10 nearest, $1/d$ & 1.00 & 1.023 (0.35) & 0.93--1.00 & 0.97 & 0.92 \\
+$n=100$, 10 nearest, $1/d$ & 1.00 & 1.016 (0.17) & 0.93--0.97 & -- & 0.97 \\
+$n=50$, all, $\exp(-d)$, undirected & 0.90 & 0.956 (0.48) & -- & -- & -- \\
+\bottomrule
+\end{tabular}
+\end{center}
+The weak identification with all actors as neighbours (third row) is visible in the standard deviation over the replications. Against least squares with a fixed, row-normalised observed network (the exposure model of \texttt{nwspmatrix} and \texttt{spregress}), 20 replications, $n=100$: when the true weights are the observed network (coefficient 0.7) the fixed-network model gives 0.683 and the influence model 0.478 (the same sign, attenuated because the latent-distance weights only approximate the observed network); when the weights depend on the latent positions (coefficient 1) the influence model gives 1.006 (root mean squared error 0.11) and the fixed-network model 0.457 (0.57).
+
+\section{Threads}
+
+For a given seed and number of chains the results are identical, exactly and not only up to Monte Carlo error, for 1, 2, 4 and 8 threads, and for a fit with the influence model for 1 and 2 threads.
+
+\section{What is not validated}
+
+The numerical checks recorded for the releases were run with Stata 17 on macOS; the package documentation reports further runs under Stata 18 and 19 on macOS and under Stata 19 on Linux and Windows. The Linux and Windows plugins are built from the same source by the continuous integration of the repository. The influence model was not compared with another implementation of the model of the paper; its checks are the simulations and the exposure model above. Nothing in this chapter is a statement about networks of more than a few hundred actors, for which no comparison with \latentnet{} was made.

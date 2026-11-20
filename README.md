@@ -14,3 +14,7 @@ regressors include the distance-weighted lagged outcomes of the other actors, jo
 See `dev/DESIGN.md` for the plan.
 
 Reference: Sweet, T. M. and Adhikari, S. 2020. A latent space network model for social influence. Psychometrika 85: 251-274.
+
+## Manual
+
+A user manual (PDF in `manual/`, with the LaTeX source and the do-files of its examples) is archived at Zenodo: <https://doi.org/10.5281/zenodo.24398243> (all versions). Cite the manual by that address together with the package version printed by `nwlsm version`.

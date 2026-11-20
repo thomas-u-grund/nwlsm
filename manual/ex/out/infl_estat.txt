@@ -1,0 +1,29 @@
+. estat influence, top(5) predict(pr) exposure(ex) exerted(xr)
+
+Latent space influence model: outcome y, lagged outcome ylag; weights invdist, 8 nearest a
+> ctors
+------------------------------------------------------------------------------
+                              Mean        Sd   MC s.e.  Lower 95% Upper 95%
+------------------------------------------------------------------------------
+_cons                       0.4484    0.0662    0.0021     0.3177    0.5776
+ylag                        0.5433    0.0757    0.0031     0.3884    0.6919
+x                          -0.3264    0.0832    0.0024    -0.4918   -0.1675
+influence                   1.1514    0.1873    0.0071     0.7856    1.5336
+sigma2_y (error variance)    0.1555    0.0593    0.0027     0.0621    0.2868
+------------------------------------------------------------------------------
+Posterior probability that the influence effect is positive: 1.0000
+R-squared of the posterior mean predictions: 0.9233; without the influence term: 0.5525; t
+> he influence term adds 0.3708
+Effective number of influencing actors per actor (inverse of the sum of squared posterior
+> mean weights, mean):  11.11
+
+Actors who exert most influence (column sums of the posterior mean weights e(W))
+--------------------------------------------------------------
+Actor                    Influence exerted   Exposure received
+--------------------------------------------------------------
+a13                                  1.348               0.488
+a23                                  1.333               0.178
+a27                                  1.321               0.044
+a36                                  1.307               0.650
+a41                                  1.301              -0.070
+--------------------------------------------------------------

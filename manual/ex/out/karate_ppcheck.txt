@@ -1,0 +1,22 @@
+. estat ppcheck
+
+Posterior predictive check: observed ties against the posterior mean tie probabilities (be
+> rnoulli family)
+--------------------------------------------------
+   Group       Dyads      Predicted       Observed
+--------------------------------------------------
+       1          56         0.0251         0.0000
+       2          56         0.0370         0.0000
+       3          56         0.0523         0.0000
+       4          56         0.0723         0.0000
+       5          56         0.1027         0.0179
+       6          56         0.1268         0.0000
+       7          56         0.1547         0.0536
+       8          56         0.1994         0.1250
+       9          56         0.2469         0.3036
+      10          57         0.3711         0.8772
+--------------------------------------------------
+Observed dyads:      561  Brier score:  0.0795  AUC:  0.9605  mean log loss:  0.2658
+Dyads are sorted by their posterior mean prediction and cut into 10 groups of about
+equal size; a well calibrated model has the observed mean close to the predicted one in
+every group.

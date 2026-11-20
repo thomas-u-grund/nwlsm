@@ -1,0 +1,24 @@
+. timer clear
+
+. timer on 1
+
+. quietly nwlsm lazega_fr, dim(2) sender receiver seed(12) threads(1)
+
+. timer off 1
+
+. timer on 2
+
+. quietly nwlsm lazega_fr, dim(2) sender receiver seed(12) chains(4) threads(1)
+
+. timer off 2
+
+. timer on 3
+
+. quietly nwlsm lazega_fr, dim(2) sender receiver seed(12) chains(4) threads(4)
+
+. timer off 3
+
+. timer list
+   1:     18.57 /        1 =      18.5710
+   2:     30.83 /        1 =      30.8320
+   3:      8.00 /        1 =       8.0000

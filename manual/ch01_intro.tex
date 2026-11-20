@@ -1,0 +1,41 @@
+\chapter{Introduction}\label{ch:intro}
+
+\section{What \texorpdfstring{\nwlsm}{nwlsm} is}
+
+\nwlsm{} fits latent space models to a network that is observed once. Every actor is given a position in a space of one to ten dimensions, and the probability of a tie between two actors depends on the distance between their positions (the Euclidean model) or on the inner product of the positions (the bilinear model). Given the positions, the ties are independent, so the model reproduces clustering and transitivity without modelling them as terms: if $i$ is close to $j$ and $j$ is close to $k$, then $i$ is close to $k$. The result is a map of the network and a posterior distribution for every coefficient, sampled by Markov chain Monte Carlo (MCMC) in a compiled plugin.
+
+The package fits the model of Hoff, Raftery and Handcock~\cite{hoff2002} in the form of the \texttt{euclidean} and \texttt{bilinear} terms of the R package \latentnet{}~\cite{krivitsky2008,latentnetpkg}, with the extensions of that package: edge covariates, random sender, receiver and sociality effects, latent clusters, and valued networks (Poisson, binomial and normal). It adds the latent space model for social influence of Sweet and Adhikari~\cite{sweet2020}, in which a linear model for an actor-level outcome is estimated together with the tie model.
+
+A latent space is a summary of the network, not a measurement of anything. The positions are identified only up to rotation, reflection and translation, and their dimensions have no meaning of their own. The model is for one network at one time.
+
+\section{Who it is for}
+
+\nwlsm{} is for people who work in Stata, or prefer it to R, and who want to describe a network by positions and groups rather than by counts of local patterns. If the question is about specific patterns such as reciprocity or triangles, an exponential random graph model (\texttt{nwergm}) answers it; if the question is about groups of actors with the same role, a stochastic block model (\texttt{nwsbm}) does. It is not a replacement for \latentnet{}, which is the more mature program; \nwlsm{} is not affiliated with or endorsed by its authors.
+
+\section{Installation and requirements}\label{sec:install}
+
+\nwlsm{} is a separate package that builds on the core package \texttt{nwcommands}. It requires nwcommands (core), version 3.29.0 or later, and Stata 17 or later; Stata/BE is enough. No R and no other software is needed. The Mata libraries of the packages are built with Stata 17, the oldest version tested; Stata 16 and older are untested. Install the core first, then \nwlsm{}:
+
+\begin{lstlisting}
+. net install nwcommands, from(https://nwcommands.org/net/) replace
+. nwinstall, everything
+\end{lstlisting}
+
+\texttt{nwinstall, everything} installs the core and the model packages in one step; \texttt{nwinstall, all} installs the core only, and \texttt{nwinstall, models} adds the model packages afterwards. To install \nwlsm{} alone, use its own address, and for a reproducible analysis the address of a tagged release:
+
+\begin{lstlisting}
+. net install nwlsm, from(https://raw.githubusercontent.com/thomas-u-grund/nwlsm/main/)
+. net install nwlsm, from(https://raw.githubusercontent.com/thomas-u-grund/nwlsm/v1.0.0/) replace
+\end{lstlisting}
+
+Updating the core never overwrites \nwlsm{}, and updating \nwlsm{} never changes the core. To check the installation:
+\showlog{version}
+The output shows the release and, in \texttt{r(version)}, the string to quote when you report an analysis.
+
+\paragraph{The native plugin.} The sampler runs in a compiled C plugin, \texttt{lsm\_sim}, that ships with the package for macOS, Linux and Windows and is found automatically. A plugin depends on the operating system and the processor, not on the version or flavour of Stata. There is no slower fallback: without a working plugin \nwlsm{} stops with an error that names the plugin. If the plugin of your platform is missing, older than the \texttt{.ado} files or does not load, \texttt{nwinstall, buildplugin(nwlsm)} compiles it on your computer (a C compiler is needed). A Mata library built by a newer Stata is ignored by an older one (every Mata function is then ``not found'', r(3499)); in that case \texttt{nwinstall, buildmata(nwlsm)} builds it with your own Stata. The build clears the data and the Mata objects in memory.
+
+\section{How this manual is organised}
+
+Chapter~\ref{ch:model} states the model and what the sampler does, Chapter~\ref{ch:start} the data and the syntax, and Chapter~\ref{ch:options} the options. Chapters~\ref{ch:effects} to~\ref{ch:influence} are worked examples for the covariates and random effects, the latent clusters, valued networks and the influence model. Chapters~\ref{ch:postest} to~\ref{ch:compare} cover post-estimation, diagnostics, plots and the comparison of models, Chapter~\ref{ch:validation} the validation against \latentnet{} and Chapter~\ref{ch:limits} the limits. The complete reference is the help files: \texttt{help nwlsm}, \texttt{help nwlsmselect} and \texttt{help nwlsmplot}.
+
+All listings are real output of the program (version~\pkgversion{}, with version 3.29.0 of the core, under Stata 17 on macOS). The commands carry a seed, so that every listing can be reproduced. The data sets are loaded with \texttt{nwwebuse} from the website of the package family: Zachary's karate club~\cite{zachary1977}, Sampson's monastery~\cite{sampson1969} and the Lazega law firm~\cite{lazega2001}. The influence example uses simulated data, made in the do-file of the example.

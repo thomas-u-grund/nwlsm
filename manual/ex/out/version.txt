@@ -1,0 +1,5 @@
+. nwlsm version
+nwlsm version 1.0.0, 20nov2026
+  status                  : latent space models (Euclidean and bilinear, valued, clusters,
+>  influence)
+  license                 : GNU GPL-3

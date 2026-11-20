@@ -1,0 +1,59 @@
+\chapter{Estimation options}\label{ch:options}
+
+The tables give all options of \texttt{nwlsm}, grouped by what they control. The model options are explained with examples in Chapters~\ref{ch:effects} to~\ref{ch:influence}; the sampler options in the sections below.
+
+\section{Model options}
+
+\begin{longtable}{@{}p{0.34\textwidth}p{0.62\textwidth}@{}}
+\toprule Option & Meaning \\ \midrule \endhead
+\opt{dim(\#)} & Number of latent dimensions, 1 to 10; default 2. \\
+\opt{edgecov(list)} & Edge covariates: networks of the same actors, or Stata matrices with one row and column per actor (Section~\ref{sec:covs}). \\
+\opt{absdiff(varlist)} & Numeric node variables entered as the absolute difference $|x_i-x_j|$. \\
+\opt{sender}, \opt{receiver} & Random sender and receiver effect for every actor (directed networks). \\
+\opt{sociality} & Random sociality effect for every actor, added to both ends of a tie (undirected and directed networks). In an undirected network it cannot be combined with \opt{sender} or \opt{receiver}. \\
+\opt{sendervar(\#)}, \opt{senderdf(\#)} & Scale (default 1) and degrees of freedom (default 3) of the prior of the sender variance; likewise \opt{receivervar()}, \opt{receiverdf()}, \opt{socialityvar()}, \opt{socialitydf()}. \\
+\opt{bilinear} & Bilinear (inner-product) latent term instead of the distance. \\
+\opt{clusters(\#)} & Number of latent clusters, 2 to 6; default none. \\
+\opt{family(name)} & \texttt{bernoulli} (default), \texttt{poisson}, \texttt{binomial} or \texttt{normal} (alias \texttt{gaussian}). \\
+\opt{trials(spec)} & Binomial family: the number of trials, as a number, a network or a Stata matrix. \\
+\opt{dispvar(\#)}, \opt{dispdf(\#)} & Normal family: scale (default 1) and degrees of freedom (default 3) of the prior of the dispersion. \\
+\opt{influence(varlist)} & Influence model: the outcome, the lagged outcome and any other regressors. \\
+\opt{neighbors(\#)} & Influence model: number of nearest actors whose lagged outcomes act on an actor; default 0, all other actors. \\
+\opt{weight(name)} & Influence model: \texttt{invdist} (default) or \texttt{expdist}. \\
+\opt{obvar(\#)}, \opt{osigma(a b)} & Influence model: prior variance of the outcome coefficients (default 100); inverse-gamma prior of the error variance (default 0.01 0.01). \\
+\bottomrule
+\end{longtable}
+
+\section{Sampler options}
+
+\begin{longtable}{@{}p{0.34\textwidth}p{0.62\textwidth}@{}}
+\toprule Option & Meaning \\ \midrule \endhead
+\opt{nsample(\#)} & Number of posterior draws kept, in all chains together; default 4000. \\
+\opt{burnin(\#)} & Sweeps discarded after the tuning runs; default 10000. \\
+\opt{interval(\#)} & Sweeps between two kept draws; default 10. \\
+\opt{pilot(\#)}, \opt{plen(\#)} & Number of tuning runs (default 4) of \opt{plen()} sweeps each (default 500) for the step sizes. \\
+\opt{mklstarts(\#)} & Number of starting points of the minimum Kullback--Leibler fit; default 4 with \opt{sender}, \opt{receiver} or \opt{sociality}, otherwise 1. \\
+\opt{chains(\#)} & Number of independent chains, run in parallel and pooled; default 1. \\
+\opt{threads(\#)} & Number of threads; default one per core of the computer; the result does not depend on it. \\
+\opt{seed(\#)} & Random-number seed. \\
+\opt{randomstart} & Random start positions instead of classical scaling. \\
+\opt{savedraws(filename)} & Save the draws of the coefficients, the log likelihood and the variances to a Stata dataset. \\
+\bottomrule
+\end{longtable}
+
+\section{How much to sample}
+
+The defaults (10,000 sweeps of burn-in, 4,000 draws, every tenth sweep kept) are those of \latentnet{}'s \texttt{ergmm}. They are a starting point: the number of draws needed depends on the network and on the question, and the effective sample sizes of \texttt{estat mcmcdiag} (Chapter~\ref{ch:diagnostics}) tell whether it was enough. A larger \opt{nsample()} or \opt{interval()} raises the effective sample size; a larger \opt{burnin()} helps when the traces of the chains still drift.
+
+\section{Chains and threads}\label{sec:chains}
+
+With \opt{chains(\#)} the command runs \# independent chains and pools their draws. \opt{nsample()} is the number of draws in all chains together, divided between the chains and rounded up; every chain has its own burn-in and tuning runs, so that more chains shorten the run only as far as the burn-in allows. The first chain starts from the classical-scaling positions, the others from over-dispersed versions of them, which is what the Gelman--Rubin statistic needs. Chain $k$ uses the seed \opt{seed()}${}+1000003\,k$. Positions of different chains are rotated differently, so only rotation-invariant quantities are compared between chains: \texttt{estat mcmcdiag} shows the Gelman--Rubin potential scale reduction factor~\cite{gelman1992} of the coefficients, the log likelihood and the variance parameters, and \texttt{e(rhat)} holds it. The minimum Kullback--Leibler fit uses the pooled draws.
+
+\opt{threads(\#)} sets how many threads the plugin uses. Chains are distributed over the threads first. Threads that are left over (more threads than chains) work inside a chain on the passes over all dyads (the updates of the coefficients) and on the minimum Kullback--Leibler fit, in networks of about 40 actors or more; the helper threads are created once and wait between the passes. A single chain cannot be made much faster than that, because its updates of the positions are sequential. The results for a given seed and \opt{chains()} are exactly the same for every value of \opt{threads()}:
+\showlog{karate_threads}
+
+\section{The saved and the stored draws}\label{sec:draws}
+
+\opt{savedraws(filename)} writes the draws of the coefficients (variables \texttt{beta\_}\emph{name}), the log likelihood (\texttt{loglik}), the variances and, with clusters, the variance of each cluster and the mixing proportions to a Stata dataset, one observation per draw. The full posterior sample also stays in Mata after the fit, and can be read with \texttt{LsmSample()}, for example \texttt{mata: LsmSample("beta")} for the draws by coefficient. The other names are \texttt{"llk"}, \texttt{"s2"}, \texttt{"class"}, \texttt{"lambda"}, \texttt{"chains"}, \texttt{"ev"} (the variances of the random effects), \texttt{"E"} (the effects by draw), \texttt{"Z"} (one row per draw: the positions by actor, then dimension), \texttt{"Zalign"} (the aligned mean positions) and \texttt{"mkl"} (the MKL positions).
+\showlog{karate_draws}
+The draws stay in memory until the next fit or \texttt{clear all}; \texttt{nwlsmplot, draws()} and \texttt{estat} commands that need them stop with an error when they are gone.

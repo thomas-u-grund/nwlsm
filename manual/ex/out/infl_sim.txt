@@ -1,0 +1,80 @@
+. set obs 60
+Number of observations (_N) was 0, now 60.
+
+. forvalues j = 1/60 {
+  2.     quietly generate double a`j' = .
+  3. }
+
+. quietly generate double y = .
+
+. quietly generate double ylag = .
+
+. quietly generate double x = .
+
+. mata:
+------------------------------------------------- mata (type end to exit) ----------------
+: n = 60; rseed(20261120)
+
+: Z = rnormal(n, 2, 0, 1.5)
+
+: D = J(n, n, 0)
+
+: for (i = 1; i <= n; i++) for (j = 1; j <= n; j++) D[i, j] = sqrt(sum((Z[i, .] - Z[j, .])
+> :^2))
+
+: A = (runiform(n, n) :< invlogit(1.5 :- D))
+
+: _diag(A, 0)
+
+: ylag = rnormal(n, 1, 0, 1)
+
+: x = rnormal(n, 1, 0, 1)
+
+: W = J(n, n, 0)
+
+: for (k = 1; k <= n; k++) {
+>     o = order(D[k, .]', 1)
+>     o = select(o, o :!= k)
+>     o = o[1..8]
+>     w = 1 :/ D[k, o]'
+>     W[k, o] = (w / sum(w))'
+> }
+
+: y = 0.5 :+ 0.6 * ylag :- 0.4 * x :+ 1 * (W * ylag) :+ rnormal(n, 1, 0, 0.5)
+
+: st_store(., (1..n), A)
+
+: st_store(., n + 1, y)
+
+: st_store(., n + 2, ylag)
+
+: st_store(., n + 3, x)
+
+: end
+------------------------------------------------------------------------------------------
+
+. nwset a1-a60, name(sim) directed
+
+. nwsummarize sim
+--------------------------------------------------
+   Network name:  sim
+   Network id:  1
+   Directed: true
+   Valued: false
+   Two-mode: false
+   Nodes: 60
+   Selfloop: false
+   Arcs: 1154
+   Minimum value:  0
+   Maximum value:  1
+   Density:  .326
+   Mean outdegree:  19.23
+   Temporal: false
+
+. summarize y ylag x
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+           y |         60    .5648352    .9986284  -1.135151   2.695693
+        ylag |         60    .0931082    1.117389  -1.900721   2.227732
+           x |         60    .0028591    .8712414  -1.664601   1.732225

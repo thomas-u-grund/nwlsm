@@ -1,0 +1,32 @@
+. nwlsmselect choice3, clusters(0 2 3 4) seed(12) refit graph gname(m_bic)
+
+Selection of the number of latent clusters by BIC (as latentnet's bic.ergmm), network choi
+> ce3
+------------------------------------------------------------------------
+  Clusters         BIC     BIC (Y)     BIC (Z) Mean loglik   BIC - min
+------------------------------------------------------------------------
+         3     285.170     185.608      99.562     -96.860       0.000  <- best
+         4     292.719     182.183     110.536     -96.509       7.549
+         2     294.992     185.482     109.509     -96.763       9.821
+         0     321.251     179.952     141.299     -94.964      36.081
+------------------------------------------------------------------------
+Sorted by BIC, smaller is better; 0 clusters is the model without clusters. The BIC
+compares fits to the same network with the same options.
+
+. matrix list r(table), format(%9.2f)
+
+r(table)[4,8]
+       clusters          BIC        BIC_Y        BIC_Z  BIC_effects       loglik
+r1         0.00       321.25       179.95       141.30         0.00       -94.96
+r2         2.00       294.99       185.48       109.51         0.00       -96.76
+r3         3.00       285.17       185.61        99.56         0.00       -96.86
+r4         4.00       292.72       182.18       110.54         0.00       -96.51
+
+           used        delta
+r1         0.00        36.08
+r2         2.00         9.82
+r3         3.00         0.00
+r4         4.00         7.55
+
+. display "best number of clusters: " r(best)
+best number of clusters: 3

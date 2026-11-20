@@ -1,0 +1,36 @@
+\chapter{Data and syntax}\label{ch:start}
+
+\section{The data}\label{sec:data}
+
+A fit needs a one-mode network of the nwcommands family in memory: undirected or directed, binary or (with \opt{family()}) valued. The network is named in the command. Self-loops are ignored and ties with a missing value are left out of the likelihood. Covariates are of two kinds. \emph{Edge covariates} (\opt{edgecov()}) are networks of the same actors or Stata matrices with one row and one column per actor; \emph{node variables} (\opt{absdiff()}, and the variables of \opt{influence()}) are numeric variables in the current dataset with one observation per actor, in the order of the actors of the network. Variables for the plots (\opt{color()}, \opt{label()}, \opt{size()}) follow the same rule.
+
+A network that is valued carries its values: a network created with \texttt{nwset, valued} (or from a weighted import) is valued. A valued network without \opt{family()} is refused unless all its ties equal 1.
+
+\section{Syntax}\label{sec:syntax}
+
+\begin{lstlisting}
+nwlsm netname [, options]
+nwlsm                                  (replay after a fit)
+estat positions | mcmcdiag | clusters | predict | gof | ppcheck | bic | influence [, options]
+nwlsmselect netname [, clusters(numlist) nwlsm_options]
+nwlsmplot [, options]
+nwlsm version
+\end{lstlisting}
+
+\texttt{nwlsm} fits the model; \texttt{estat} commands work on the last fit (Chapters~\ref{ch:postest} and~\ref{ch:diagnostics}); \texttt{nwlsmselect} fits the model for several numbers of clusters (Chapter~\ref{ch:compare}); \texttt{nwlsmplot} draws the positions (Chapter~\ref{ch:plots}). The options are in Chapter~\ref{ch:options}.
+
+\section{A first model}\label{sec:first}
+
+Zachary's karate club~\cite{zachary1977} has 34 members and 78 friendship ties (undirected). The network is loaded with \texttt{nwwebuse}:
+\showlog{karate_data}
+The first model has two latent dimensions and an intercept. Two chains of 1,000 draws each are run after a burn-in of 5,000 sweeps, and a seed makes the fit reproducible:
+\showlog{karate_fit}
+The header says what was fitted, the number of draws, the burn-in, the interval between kept draws, the seed and the posterior mean of the log likelihood. The table gives, for every coefficient, the posterior mean and standard deviation, the Monte Carlo standard error of the mean (computed by batch means; the error due to the finite number of draws) and the 95\% posterior interval (the 2.5th and 97.5th percentiles of the draws). Below it come the same summaries for the variance of the positions (\texttt{sigma2}) and, when the model has them, the variances of the random effects. The intercept is 1.01: with no distance between two actors the log odds of a tie would be about 1. The variance of the positions says how spread out the actors are in the latent space. The acceptance rate of the positions (0.24) is near the 0.234 at which the step sizes are tuned (Section~\ref{sec:sampler}), and the Gelman--Rubin statistic of the two chains, 1.005, is close to 1 (Chapter~\ref{ch:diagnostics}).
+
+Because the algorithm simulates, the numbers depend on the random-number seed. \opt{seed(\#)} sets it; without it the seed is drawn from Stata's generator, so \texttt{set seed} before the command makes a fit reproducible. For a given seed and number of chains the result is the same for any number of threads (Section~\ref{sec:chains}). The fits of this manual give the seed in the command.
+
+\section{Replay and version}
+
+The command without arguments replays the last fit; \texttt{e(version)} holds the version of the program that produced it:
+\showlog{karate_replay}
+\texttt{estimates store} and \texttt{estimates restore} work as for other estimation commands. The full posterior sample stays in Mata after the fit (Section~\ref{sec:draws}).

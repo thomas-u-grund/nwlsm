@@ -1,0 +1,19 @@
+. estat mcmcdiag
+
+MCMC diagnostics (4000 draws in 2 chains, interval 10)
+----------------------------------------------------------------------------
+Parameter                   Mean        Sd       ESS  ESS/draw  Geweke z      Rhat
+----------------------------------------------------------------------------
+_cons                    -0.0982    0.1439     508.7     0.127     -0.47     1.001
+loglik                -1486.2924   11.9711    1479.4     0.370     -0.20     1.000
+sigma2                    2.4788    0.3647    1235.5     0.309      0.33     1.002
+sender_var                0.4160    0.1155    1508.2     0.377     -2.51     1.000
+receiver_var              0.2201    0.0607    1698.6     0.425      1.35     1.003
+----------------------------------------------------------------------------
+Acceptance rates: positions 0.232, _cons 0.229, sender 0.231, receiver 0.227
+ESS: effective sample size by the initial monotone positive sequence estimator. Geweke
+z: first 10% of the draws against the last 50%; |z| above 2 suggests that the chain has
+not settled.
+With 2 chains: ESS is the sum over the chains, Geweke z the value of largest size over
+the chains, Rhat the Gelman-Rubin potential scale reduction factor (values close to 1,
+say below 1.1, indicate that the chains agree).

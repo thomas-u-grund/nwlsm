@@ -1,0 +1,24 @@
+. nwtomata lazega_adv, mat(ADVM)
+
+. mata: _diag(ADVM, 0); st_matrix("ADV", ADVM)
+
+. nwlsm lazega_fr, dim(2) edgecov(ADV) seed(12)
+------------------------------------------------------------------------------
+Latent space model (Euclidean distance; bernoulli family), posterior by MCMC
+Network: lazega_fr (71 actors, directed)           Latent dimensions: 2
+Draws: 4000  burn-in: 10000  interval: 10          Seed: 12
+Posterior mean log likelihood: -1356.672 (sd 10.822)
+------------------------------------------------------------------------------
+                              Mean        Sd   MC s.e.  Lower 95% Upper 95%
+------------------------------------------------------------------------------
+_cons                      -1.2747    0.1188    0.0047    -1.4957   -1.0418
+edgecov_ADV                 2.5411    0.1208    0.0037     2.3085    2.7806
+------------------------------------------------------------------------------
+Variance parameters (posterior):
+sigma2                      1.6131    0.2463    0.0068     1.1902    2.1459
+------------------------------------------------------------------------------
+Acceptance rate of the latent positions: 0.235
+Positions: minimum Kullback-Leibler estimate e(Z) (also estat positions); mean of the
+draws aligned to it e(Zmean); posterior mean distances e(D); posterior mean tie
+probabilities e(P). Positions are identified up to rotation, reflection and translation
+only.

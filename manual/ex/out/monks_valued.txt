@@ -1,0 +1,121 @@
+. nwsummarize samplike
+--------------------------------------------------
+   Network name:  samplike
+   Network id:  4
+   Directed: true
+   Valued: true
+   Two-mode: false
+   Nodes: 18
+   Selfloop: false
+   Arcs: 88
+   Minimum value:  0
+   Maximum value:  3
+   Density:  .288
+   Mean outdegree:  4.89
+   Temporal: false
+
+. nwlsm samplike, family(binomial) trials(3) dim(2) clusters(3) seed(12)
+------------------------------------------------------------------------------
+Latent space model (Euclidean distance; binomial family), posterior by MCMC
+Network: samplike (18 actors, directed)            Latent dimensions: 2
+Draws: 4000  burn-in: 10000  interval: 10          Seed: 12
+Latent clusters: 3
+Posterior mean log likelihood:  -238.767 (sd  5.373)
+------------------------------------------------------------------------------
+                              Mean        Sd   MC s.e.  Lower 95% Upper 95%
+------------------------------------------------------------------------------
+_cons                       1.6938    0.3017    0.0176     1.1046    2.2975
+------------------------------------------------------------------------------
+Variance parameters (posterior):
+sigma2_1                    1.6467    2.2978    0.0545     0.2135    6.6927
+sigma2_2                    1.7204    1.5125    0.0442     0.3413    5.4887
+sigma2_3                    2.1897    1.6290    0.0639     0.4952    6.5605
+------------------------------------------------------------------------------
+Acceptance rate of the latent positions: 0.241
+Latent clusters: estat clusters lists the posterior membership probabilities and the
+classification; cluster means e(cmeans), mixing proportions e(lambda).
+Positions: minimum Kullback-Leibler estimate e(Z) (also estat positions); mean of the
+draws aligned to it e(Zmean); posterior mean distances e(D); posterior mean tie
+probabilities e(P). Positions are identified up to rotation, reflection and translation
+only.
+
+. estat gof, gof(distance values) nsim(100) seed(1)
+
+Goodness of fit: minimum geodesic distance (100 networks simulated from the posterior)
+------------------------------------------------------------------
+    Distance |  Observed       Min      Mean       Max  MC p-value
+-------------+----------------------------------------------------
+           1 |        88        88    107.55       129        0.02
+           2 |       136       118    146.96       167        0.20
+           3 |        77        19     48.13        77        0.02
+           4 |         5         0      2.99        17        0.56
+           5 |         0         0      0.03         1        1.00
+         Inf |         0         0      0.34        17        1.00
+------------------------------------------------------------------
+
+Goodness of fit: tie values (100 networks simulated from the posterior)
+------------------------------------------------------------------
+       Value |  Observed       Min      Mean       Max  MC p-value
+-------------+----------------------------------------------------
+           0 |       218       177    198.45       218        0.02
+           1 |        38        46     62.39        82        0.00
+           2 |        20        21     31.85        45        0.00
+           3 |        30         5     13.31        26        0.00
+------------------------------------------------------------------
+Each simulated network is drawn from the model at one of 100 posterior draws (evenly
+spaced over the stored draws). MC p-value: 2 min(P(simulated <= observed), P(simulated
+>= observed)), at most 1, as in latentnet. Missing dyads of the observed network count
+as no tie.
+Degree, shared partners and distances are those of the network of the dyads with a
+positive value.
+
+. estat gof, gof(distance) nsim(100) seed(1) cutoff(1)
+
+Goodness of fit: minimum geodesic distance (100 networks simulated from the posterior)
+------------------------------------------------------------------
+    Distance |  Observed       Min      Mean       Max  MC p-value
+-------------+----------------------------------------------------
+           1 |        50        33     45.16        60        0.38
+           2 |        73        29     50.84        89        0.12
+           3 |        72        11     41.13        84        0.08
+           4 |        51         0     30.03        64        0.18
+           5 |        21         0     18.51        49        0.86
+           6 |         6         0      8.50        35        1.00
+           7 |         0         0      3.08        25        0.92
+           8 |         0         0      0.99        10        1.00
+           9 |         0         0      0.21         8        1.00
+          10 |         0         0      0.07         7        1.00
+          11 |         0         0      0.04         4        1.00
+          12 |         0         0      0.01         1        1.00
+         Inf |        33         0    107.43       217        0.34
+------------------------------------------------------------------
+Each simulated network is drawn from the model at one of 100 posterior draws (evenly
+spaced over the stored draws). MC p-value: 2 min(P(simulated <= observed), P(simulated
+>= observed)), at most 1, as in latentnet. Missing dyads of the observed network count
+as no tie.
+Degree, shared partners and distances are those of the network of the dyads with a value
+above 1.
+
+. estat ppcheck
+
+Posterior predictive check: observed values against the posterior mean expected values (bi
+> nomial family)
+--------------------------------------------------
+   Group       Dyads      Predicted       Observed
+--------------------------------------------------
+       1          30         0.0240         0.0000
+       2          31         0.0539         0.0323
+       3          30         0.0980         0.1000
+       4          31         0.1425         0.1290
+       5          31         0.2228         0.0968
+       6          30         0.3562         0.2667
+       7          31         0.5343         0.7742
+       8          30         0.8922         0.3667
+       9          31         1.2533         1.1935
+      10          31         1.8752         2.4839
+--------------------------------------------------
+Observed dyads:      306  RMSE:    0.6884  correlation:  0.7241  mean absolute error:    0
+> .4619
+Dyads are sorted by their posterior mean prediction and cut into 10 groups of about
+equal size; a well calibrated model has the observed mean close to the predicted one in
+every group.

@@ -1,0 +1,26 @@
+. estat clusters, generate(grp) nolist
+Classification stored in grp_class, probabilities in grp_p1 to grp_p3.
+
+. tabulate grp_class faction
+
+           |             faction
+ grp_class |     Loyal   Outcasts      Turks |     Total
+-----------+---------------------------------+----------
+         1 |         0          0          7 |         7
+         2 |         0          4          0 |         4
+         3 |         7          0          0 |         7
+-----------+---------------------------------+----------
+     Total |         7          4          7 |        18
+
+. summarize grp_p1 grp_p2 grp_p3, separator(0)
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+      grp_p1 |         18    .3815556    .4078996     .00475     .92725
+      grp_p2 |         18    .2320833    .3067596      .0175       .821
+      grp_p3 |         18    .3863611    .4657153      .0045       .977
+
+. generate pmax = max(grp_p1, grp_p2, grp_p3)
+
+. count if pmax < 0.8
+  3

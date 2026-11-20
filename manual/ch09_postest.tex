@@ -1,0 +1,54 @@
+\chapter{Post-estimation}\label{ch:postest}
+
+All \texttt{estat} commands work on the last fit. The commands that use the posterior draws (\texttt{estat mcmcdiag} and \texttt{estat gof}) need the draws of that fit, which stay in memory after the fit (Section~\ref{sec:draws}).
+
+\section{Positions}
+
+\texttt{estat positions} lists the minimum Kullback--Leibler positions (Section~\ref{sec:mkl}) with the posterior mean random effects, and returns them in \texttt{r(Z)}; the option \opt{mean} lists the mean of the aligned draws instead. With \opt{generate(stub)} the coordinates go into the variables \emph{stub}1, \emph{stub}2, \dots{} of a dataset with one observation per actor, in the order of the actors.
+\showlog{karate_pos}
+The positions are a picture, not a measurement: turning or flipping them changes the coordinates and nothing else. Two members of the karate club have exactly the same positions (members 6 and 7 here), because they have the same ties; they lie on top of each other in a plot.
+
+\section{Predictions}
+
+\texttt{estat predict} returns the posterior mean tie probabilities (the expected values for a valued network) in \texttt{r(P)}; with \opt{generate(netname)} they are stored as a valued network, \opt{replace} overwrites an existing one.
+
+\section{Clusters}
+
+\texttt{estat clusters} (after \opt{clusters()}) lists the posterior membership probabilities and the classification, returns them in \texttt{r(Q)} and \texttt{r(class)}, and with \opt{generate(stub)} adds the variables \emph{stub}\texttt{\_class} and \emph{stub}\texttt{\_p1}, \emph{stub}\texttt{\_p2}, \dots{} (Chapter~\ref{ch:clusters}).
+
+\section{BIC}
+
+\texttt{estat bic} is described in Section~\ref{sec:bic}. It is available for a binary network with the Euclidean distance, not for valued networks, the bilinear model or the influence model. It returns \texttt{r(bic)}, \texttt{r(bic\_y)}, \texttt{r(bic\_z)}, \texttt{r(bic\_sender)}, \texttt{r(bic\_receiver)}, \texttt{r(bic\_sociality)}, \texttt{r(p)}, \texttt{r(loglik\_mle)}, \texttt{r(effobs)} and \texttt{r(components)}.
+
+\section{Influence}
+
+\texttt{estat influence} is described in Chapter~\ref{ch:influence}. The diagnostics and the goodness of fit are in Chapter~\ref{ch:diagnostics}.
+
+\section{Stored results}\label{sec:results}
+
+\begin{longtable}{@{}p{0.36\textwidth}p{0.6\textwidth}@{}}
+\toprule Result & Content \\ \midrule \endhead
+\multicolumn{2}{@{}l}{\textbf{Scalars}} \\
+\texttt{e(N)}, \texttt{e(N\_nodes)} & Number of dyads (pairs for an undirected network) and of actors. \\
+\texttt{e(dim)}, \texttt{e(nsample)}, \texttt{e(burnin)}, \texttt{e(interval)}, \texttt{e(seed)}, \texttt{e(mklstarts)} & Settings of the run (\texttt{e(nsample)}: draws in all chains). \\
+\texttt{e(chains)}, \texttt{e(nsample\_chain)}, \texttt{e(threads)}, \texttt{e(clusters)} & Number of chains, draws per chain, threads requested (0: one per core), number of latent clusters. \\
+\texttt{e(ll\_mean)}, \texttt{e(ll\_sd)} & Posterior mean and standard deviation of the log likelihood. \\
+\texttt{e(sigma2\_mean)}, \texttt{e(sigma2\_sd)}, \texttt{e(prior\_scale)}, \texttt{e(prior\_df)} & Posterior mean and standard deviation of the variance of the positions, and the scale and degrees of freedom of its prior. \\
+\texttt{e(mkl\_start)}, \texttt{e(mkl\_iter)}, \texttt{e(mkl\_obj)} & The draw that started the MKL fit, its iterations, the maximised log likelihood of the posterior mean tie probabilities. \\
+\multicolumn{2}{@{}l}{\textbf{Matrices}} \\
+\texttt{e(b)}, \texttt{e(V)} & Posterior means and covariance of the coefficients. \\
+\texttt{e(summary)}, \texttt{e(vsummary)} & Mean, standard deviation, Monte Carlo standard error and 95\% interval of each coefficient; the same for the variances of the positions and of the random effects. \\
+\texttt{e(rhat)} & Gelman--Rubin statistics (several chains). \\
+\texttt{e(tuning)} & Acceptance rates (sampling phase) and final step sizes. \\
+\texttt{e(Z)}, \texttt{e(Zmean)} & MKL positions; mean of the aligned draws. \\
+\texttt{e(D)}, \texttt{e(P)} & Posterior mean distances (for \opt{bilinear} minus the inner products); posterior mean tie probabilities or expected values. \\
+\texttt{e(sender)}, \texttt{e(receiver)}, \texttt{e(sociality)} & Posterior mean and standard deviation of each effect, one row per actor. \\
+\texttt{e(mkl\_b)}, \texttt{e(mkl\_effects)} & Coefficients and effects of the MKL fit. \\
+\texttt{e(Q)}, \texttt{e(class)}, \texttt{e(cmeans)}, \texttt{e(lambda)} & Latent clusters: membership probabilities, classification, cluster centres, mixing proportions. \\
+\multicolumn{2}{@{}l}{\textbf{Macros}} \\
+\texttt{e(cmd)}, \texttt{e(version)} & \texttt{nwlsm} and the version. \\
+\texttt{e(effects)}, \texttt{e(latent)} & The random effects in the model; \texttt{euclidean} or \texttt{bilinear}. \\
+\texttt{e(family)}, \texttt{e(trials)}, \texttt{e(dispvar)}, \texttt{e(dispdf)} & The family; the number of trials if one number was given; the prior of the dispersion. \\
+\bottomrule
+\end{longtable}
+\texttt{e(D)}, \texttt{e(P)}, \texttt{e(Z)} and the related matrices are stored when the number of actors fits into a Stata matrix. The stored results of the influence model are listed in Chapter~\ref{ch:influence}.

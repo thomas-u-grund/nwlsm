@@ -1,0 +1,35 @@
+\chapter{Limits and technical notes}\label{ch:limits}
+
+\section{What \texorpdfstring{\nwlsm}{nwlsm}{} does not do}
+
+\begin{itemize}[nosep]
+  \item \textbf{One network at one time.} The model describes one network observed once. There are no dynamic networks, no two-mode (bipartite) networks, and no model for several networks at once.
+  \item \textbf{Influence.} The influence model covers one network and one outcome wave with a Gaussian outcome. Not implemented are the hierarchical model for several networks with random coefficients, the susceptibility indicator of Sweet and Adhikari, several outcome waves, and binary or count outcomes.
+  \item \textbf{Valued networks.} The families are Poisson, binomial and normal. There is no ordered-category family. Goodness of fit for valued networks goes beyond the distribution of the values only through the structure statistics of a cutoff network.
+  \item \textbf{BIC.} \texttt{estat bic} and \texttt{nwlsmselect} are for binary networks with the Euclidean distance, not for valued networks, the bilinear term or the influence model.
+  \item \textbf{Dimensions.} One to ten dimensions, and 2 to 6 latent clusters.
+  \item \textbf{Plots.} Compared with \texttt{plot.ergmm()} of \latentnet{}: no pie charts of the membership probabilities, no density plots, no plots of one latent dimension, no 3-D plots, no \texttt{Z.ref} and \texttt{zoom.on}.
+  \item \textbf{No replacement for latentnet.} \latentnet{} is the more mature and more widely used program. Use it alongside \nwlsm{} where the result matters.
+\end{itemize}
+
+\section{Differences from latentnet that matter}
+
+The differences are listed in Section~\ref{sec:deviations}: the starts and the weak ridge of the minimum Kullback--Leibler fit, the cluster results as aligned posterior means, the goodness of fit of undirected networks, the BIC mixture fit, and the default of 4 starts with random effects. The influence model differs from the paper as listed in Chapter~\ref{ch:influence}.
+
+\section{Size and computing time}
+
+The cost of a sweep is quadratic in the number of actors, because every position update goes over all dyads of the actor and the coefficient updates pass over all dyads. The positions of one chain are updated one actor at a time, so a single chain cannot be made much faster by threads; chains run in parallel. The default settings (10,000 sweeps of burn-in and 4,000 draws at an interval of 10, that is 50,000 sweeps, plus 4 tuning runs of 500) were timed on the Lazega friendship network with 71 actors, a directed network with sender and receiver effects, on one computer (an 18-core Mac, Stata 17) in a single run; the times depend on the computer and its load:
+\showlog{lazega_time}
+\texttt{timer 1} is a single chain with one thread (the default of \opt{chains()}), \texttt{timer 2} four chains pooled with one thread and \texttt{timer 3} the same four chains on four threads. The results of fits with the same seed and number of chains do not depend on the number of threads (Section~\ref{sec:chains}). The matrices \texttt{e(D)}, \texttt{e(P)}, \texttt{e(Z)} and the like are stored when the number of actors fits into a Stata matrix; the posterior sample is kept in Mata, so that very large networks need memory for the draws of all positions (one row per draw, $n\times d$ values) as well.
+
+\section{The compiled plugin and the Mata library}
+
+The sampler, the likelihoods, the minimum Kullback--Leibler fit and the simulation for the goodness of fit are in a C plugin that ships with the package; the tables and the post-estimation commands are Stata and Mata code. See Section~\ref{sec:install} for the plugin and the Mata library on your own computer.
+
+\section{Reproducibility and versions}
+
+State the exact version, \texttt{e(version)} or \texttt{nwlsm version}, the seed and the number of chains when you report an analysis. For a given version, seed and number of chains a fit is exactly reproducible, whatever the number of threads. The syntax, the stored results and the options are kept within the series 1.x; a change of the version may change the numbers of a fit with the same seed when the sampler changed, and the documentation of the version says so.
+
+\section{Reference: the help files}
+
+The complete reference of the commands is in the help files: \texttt{help nwlsm} (model, options, priors, results and the influence model), \texttt{help nwlsmselect} and \texttt{help nwlsmplot}. The package has dialog boxes for the commands, opened from the menu of the core package.

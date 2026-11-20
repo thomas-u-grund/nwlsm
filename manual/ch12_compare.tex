@@ -1,0 +1,17 @@
+\chapter{Comparing models}\label{ch:compare}
+
+\section{Posterior mean log likelihoods: nwcompare}
+
+\texttt{nwcompare} of the core package lists, one row per stored model, the number of observations, the log likelihood, the number of parameters and the criteria AIC, BIC and ICL. For \nwlsm{} it shows the posterior mean of the log likelihood, \texttt{e(ll\_mean)}; there is no AIC or BIC, because the fit is Bayesian, and no ICL, which is the criterion of the block model \texttt{nwsbm}. $N$ is the number of dyads and $k$ the number of coefficients; the latent positions and the variances are not counted. Models are stored with \texttt{estimates store} after each fit and listed together:
+\showlog{compare_table}
+The posterior mean log likelihood is not a maximised likelihood and does not penalise the number of parameters, so a model with more dimensions or more effects always looks better: three dimensions give $-1503.5$ against $-1551.0$ for two, and the sender and receiver effects $-1486.3$. The comparison across families (an ERGM, a latent space model and a block model of the same network) is a rough guide only, as the help of \texttt{nwcompare} says: the criteria are built on different likelihoods and different observation counts. Compare within a family first.
+
+\section{The BIC and the number of clusters}
+
+For a binary network with the Euclidean distance, \texttt{estat bic} gives the BIC of \latentnet{}'s \texttt{bic.ergmm()} (Section~\ref{sec:bic}), and \texttt{nwlsmselect} computes it for several numbers of clusters. The options of \texttt{nwlsmselect} are \opt{clusters(numlist)} (0 for no clusters, 2 to 6; default \texttt{0 2 3 4}), \opt{effobs()}, \opt{refit}, \opt{nolist}, \opt{graph}, \opt{gname()}, \opt{gopts()} and any option of \texttt{nwlsm} for every fit, such as \opt{dim()}, \opt{edgecov()}, \opt{absdiff()}, \opt{sender} and \opt{seed()}, but not \opt{influence()}, \opt{bilinear} or \opt{family()}. All fits use the same options and the same seed. On the Lazega friendship network with the seniority covariate:
+\showlog{compare_select}
+The BIC prefers two clusters, 6.9 points ahead of three and 14.9 ahead of no clusters. A difference of 6.9 is not a large one, and Chapter~\ref{ch:clusters} shows how to look at the parts of the BIC and at the clusters themselves. \latentnet{} itself warns that the BIC is not certain to be appropriate for choosing the dimension, the random effects, or between clustered and unclustered models. Use it as a guide and check the clusters against what is known from outside the model, as in Chapter~\ref{ch:clusters}.
+
+\section{Dimensions and other choices}
+
+\nwlsm{} has no criterion for the number of dimensions. The goodness of fit (Chapter~\ref{ch:diagnostics}) shows whether a model reproduces the degrees and the distances of the network; \texttt{estat ppcheck} gives the Brier score, the AUC and the log loss of the posterior mean predictions; and the posterior mean log likelihoods give a descriptive comparison. These are in-sample measures.

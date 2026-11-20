@@ -1,0 +1,63 @@
+. nwlsm choice3, dim(2) clusters(3) seed(12)
+------------------------------------------------------------------------------
+Latent space model (Euclidean distance; bernoulli family), posterior by MCMC
+Network: choice3 (18 actors, directed)             Latent dimensions: 2
+Draws: 4000  burn-in: 10000  interval: 10          Seed: 12
+Latent clusters: 3
+Posterior mean log likelihood:   -96.860 (sd  4.859)
+------------------------------------------------------------------------------
+                              Mean        Sd   MC s.e.  Lower 95% Upper 95%
+------------------------------------------------------------------------------
+_cons                       1.3861    0.4489    0.0239     0.5864    2.3740
+------------------------------------------------------------------------------
+Variance parameters (posterior):
+sigma2_1                    1.2681    1.2712    0.0483     0.2422    4.6147
+sigma2_2                    1.4263    3.2387    0.0610     0.2013    5.8732
+sigma2_3                    1.0410    1.0163    0.0368     0.2287    3.7069
+------------------------------------------------------------------------------
+Acceptance rate of the latent positions: 0.289
+Latent clusters: estat clusters lists the posterior membership probabilities and the
+classification; cluster means e(cmeans), mixing proportions e(lambda).
+Positions: minimum Kullback-Leibler estimate e(Z) (also estat positions); mean of the
+draws aligned to it e(Zmean); posterior mean distances e(D); posterior mean tie
+probabilities e(P). Positions are identified up to rotation, reflection and translation
+only.
+
+. estat gof, gof(odegree distance) nsim(100) seed(1)
+
+Goodness of fit: out-degree (100 networks simulated from the posterior)
+------------------------------------------------------------------
+  Out-degree |  Observed       Min      Mean       Max  MC p-value
+-------------+----------------------------------------------------
+           0 |         0         0      0.41         2        1.00
+           1 |         0         0      2.10         5        0.24
+           2 |         0         1      4.16         9        0.00
+           3 |        16         0      4.52        10        0.00
+           4 |         2         1      3.91         8        0.40
+           5 |         0         0      1.91         6        0.14
+           6 |         0         0      0.77         4        0.90
+           7 |         0         0      0.18         2        1.00
+           8 |         0         0      0.03         1        1.00
+           9 |         0         0      0.01         1        1.00
+------------------------------------------------------------------
+
+Goodness of fit: minimum geodesic distance (100 networks simulated from the posterior)
+------------------------------------------------------------------
+    Distance |  Observed       Min      Mean       Max  MC p-value
+-------------+----------------------------------------------------
+           1 |        56        41     55.38        72        0.90
+           2 |        73        44     73.18       114        0.98
+           3 |        63        16     59.16        95        0.84
+           4 |        45         3     38.78        62        0.78
+           5 |        31         0     19.35        50        0.32
+           6 |        15         0      7.44        28        0.32
+           7 |         6         0      2.31        15        0.38
+           8 |         0         0      0.61        12        1.00
+           9 |         0         0      0.13         4        1.00
+          10 |         0         0      0.04         3        1.00
+         Inf |        17         0     49.62       175        0.96
+------------------------------------------------------------------
+Each simulated network is drawn from the model at one of 100 posterior draws (evenly
+spaced over the stored draws). MC p-value: 2 min(P(simulated <= observed), P(simulated
+>= observed)), at most 1, as in latentnet. Missing dyads of the observed network count
+as no tie.

@@ -310,6 +310,13 @@ the R-squared of the posterior mean predictions with and without the influence t
 {phang2}{cmd:. nwlsmplot, clusters}{p_end}
 {phang2}{cmd:. nwlsmplot, color(gender) size(sociality)}{p_end}
 
+{title:Manual}
+
+{pstd}
+A user manual (PDF in the {cmd:manual} folder of the package source) is archived at Zenodo, {browse "https://doi.org/10.5281/zenodo.24398243":doi:10.5281/zenodo.24398243}, all versions. Please cite it by that address and report the package version printed by {cmd:nwlsm version}.
+{p_end}
+
+
 {title:Reference}
 
 {p 4 8 2}Hoff, P. D., Raftery, A. E. and Handcock, M. S. 2002. Latent space approaches to social network analysis. Journal of the American Statistical Association 97: 1090-1098.{p_end}

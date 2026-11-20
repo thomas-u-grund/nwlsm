@@ -1,0 +1,19 @@
+. estat gof, gof(distance) nsim(100) seed(1)
+
+Goodness of fit: minimum geodesic distance (100 networks simulated from the posterior)
+------------------------------------------------------------------
+    Distance |  Observed       Min      Mean       Max  MC p-value
+-------------+----------------------------------------------------
+           1 |       575       498    572.41       668        0.90
+           2 |      2316      1891   2241.64      2647        0.58
+           3 |      1782      1538   1765.04      1973        0.90
+           4 |       154        94    266.39       458        0.12
+           5 |         3         0     16.03        85        0.48
+           6 |         0         0      0.98        55        1.00
+           7 |         0         0      0.24        24        1.00
+         Inf |       140         0    107.27       280        0.72
+------------------------------------------------------------------
+Each simulated network is drawn from the model at one of 100 posterior draws (evenly
+spaced over the stored draws). MC p-value: 2 min(P(simulated <= observed), P(simulated
+>= observed)), at most 1, as in latentnet. Missing dyads of the observed network count
+as no tie.

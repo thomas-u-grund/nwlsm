@@ -1,0 +1,24 @@
+. nwlsm
+------------------------------------------------------------------------------
+Latent space model (Euclidean distance; bernoulli family), posterior by MCMC
+Network: zachary_bin (34 actors, undirected)       Latent dimensions: 2
+Draws: 2000  burn-in: 5000  interval: 10           Seed: 20261120
+Chains: 2 (1000 draws each, pooled)
+Posterior mean log likelihood:  -170.621 (sd  7.596)
+------------------------------------------------------------------------------
+                              Mean        Sd   MC s.e.  Lower 95% Upper 95%
+------------------------------------------------------------------------------
+_cons                       1.0127    0.3748    0.0271     0.3151    1.7703
+------------------------------------------------------------------------------
+Variance parameters (posterior):
+sigma2                      4.6310    1.5218    0.0955     2.2146    8.3254
+------------------------------------------------------------------------------
+Acceptance rate of the latent positions: 0.239
+Gelman-Rubin statistic: largest value  1.005 (see estat mcmcdiag)
+Positions: minimum Kullback-Leibler estimate e(Z) (also estat positions); mean of the
+draws aligned to it e(Zmean); posterior mean distances e(D); posterior mean tie
+probabilities e(P). Positions are identified up to rotation, reflection and translation
+only.
+
+. display "version: " e(version)
+version: 1.0.0

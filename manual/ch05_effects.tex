@@ -1,0 +1,34 @@
+\chapter{Covariates and random effects}\label{ch:effects}
+
+This chapter uses the friendship network of the 71 lawyers of the Lazega law firm~\cite{lazega2001} (a directed network with 575 ties, loaded with \texttt{nwwebuse lazega}), together with the advice and co-working networks and the attributes of the lawyers, for example \texttt{seniority}.
+\showlog{lazega_data}
+
+\section{Node variables and edge covariates}\label{sec:covs}
+
+\opt{absdiff(varlist)} enters the absolute difference of a numeric node variable as a covariate: the log odds of a tie change by the coefficient for each unit of difference in the variable, over and above the latent distance. The variable needs one observation per actor, in the order of the actors of the network, and no missing values. Does a smaller difference in seniority make a friendship tie more likely?
+\showlog{lazega_fit}
+The coefficient of \texttt{absdiff\_seniority} is $-0.012$ (95\% interval $-0.018$ to $-0.005$ in the log odds per rank of difference): lawyers who are closer in seniority are somewhat more likely to name each other, once the latent distance is accounted for. The variance of the positions is 2.4.
+
+\opt{edgecov(list)} takes edge covariates: networks of the same actors, or Stata matrices with one row and one column per actor. The value $x_{ij}$ of the matrix is the covariate of the tie from $i$ to $j$. An edge covariate must not have missing values, and a matrix made from a network by \texttt{nwtomata} has missing values on its diagonal; set the diagonal to 0 first (the diagonal is not used, because self-loops are ignored). Here the advice network is the covariate: is a friendship tie more likely where one lawyer asks the other for advice?
+\showlog{lazega_edgecov}
+The coefficient 2.54 is large: a tie in the advice network multiplies the odds of a friendship tie by about $e^{2.54}\approx 12.7$, given the positions. The coefficient is named after the matrix (\texttt{edgecov\_ADV}); several covariates can be listed, and the same covariate must not be listed twice.
+
+\section{Random sender, receiver and sociality effects}
+
+In a directed network, \opt{sender} gives every actor a random propensity $s_i$ to send ties and \opt{receiver} a random propensity $r_j$ to receive them; \opt{sociality} gives every actor one propensity $o_i$ that adds to both ends of a tie, and works in undirected and directed networks. The effects are normal with mean 0 and a variance that is estimated (the prior is a scaled inverse chi-squared distribution with scale 1 and 3 degrees of freedom, Chapter~\ref{ch:model}; \opt{sendervar()}, \opt{senderdf()} and the like change it). The effects let actors differ in how many ties they send and receive, which a distance-only model reproduces poorly, since in the latent space only the position makes an actor popular. The variances of the effects are reported with the variance of the positions, and the effect of each actor is in \texttt{e(sender)}, \texttt{e(receiver)} and \texttt{e(sociality)} (posterior mean and standard deviation, one row per actor).
+\showlog{lazega_sr}
+The posterior mean log likelihood rises from $-1551.0$ without the effects (Chapter~\ref{ch:compare}) to $-1486.3$ with them. The variance of the sender effect (0.42) is about twice that of the receiver effect (0.22): the lawyers differ more in how many friends they name than in how many name them.
+
+\paragraph{Starts of the minimum Kullback--Leibler fit.} With random effects the default number of starting points of the MKL fit is 4 instead of 1 (Section~\ref{sec:deviations}); the number used is in \texttt{e(mklstarts)}.
+
+\section{The bilinear term}
+
+\opt{bilinear} replaces the distance by the inner product of the positions, $z_i'z_j$, which is added to the log odds. Two actors with positions pointing in the same direction are then more likely to be tied, and an actor far from the origin has a high or low propensity to be tied to many actors depending on the direction. The distance obeys the triangle inequality and the inner product does not, so the two models describe clustering differently; the bilinear positions are identified only up to rotation and reflection. On the karate club:
+\showlog{karate_bil}
+The intercept is $-3.97$ and the posterior mean log likelihood $-112.4$ (against $-170.6$ with the distance, Section~\ref{sec:first}). The influence model needs the Euclidean distance and cannot be combined with \opt{bilinear}, and \texttt{estat bic} is not available for it.
+
+\section{A random sociality effect on the karate club}
+
+The karate club has two hubs, a member with 16 and a member with 17 friends, that a distance-only model cannot reproduce (Chapter~\ref{ch:diagnostics}). A random sociality effect lets each member have a propensity to have ties:
+\showlog{karate_soc}
+The variance of the sociality effect is 2.9 (95\% interval 1.2 to 6.3), and the posterior mean log likelihood rises from $-170.6$ (Section~\ref{sec:first}) to $-98.8$. The intercept and the variance of the positions are weakly identified together with the effects: the intercept is now 1.8 with a much wider interval, and the variance of the positions has grown to 12.6.

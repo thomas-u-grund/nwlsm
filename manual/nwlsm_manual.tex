@@ -1,0 +1,85 @@
+\documentclass[11pt,a4paper]{report}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern,microtype}
+\usepackage[margin=2.4cm]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs,longtable,array,amsmath,amssymb,xcolor,listings,hyperref,enumitem,titlesec,etoolbox}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black,citecolor=blue!50!black,pdftitle={nwlsm: Latent space models for networks in Stata. Manual},pdfauthor={Thomas U. Grund}}
+\lstdefinestyle{stata}{basicstyle=\ttfamily\footnotesize,backgroundcolor=\color{black!4},frame=single,rulecolor=\color{black!20},breaklines=true,columns=fullflexible,keepspaces=true,xleftmargin=2pt,xrightmargin=2pt,aboveskip=8pt,belowskip=8pt}
+\lstset{style=stata}
+\setlength{\emergencystretch}{3em}
+\newcommand{\nwlsm}{\texttt{nwlsm}}
+\newcommand{\latentnet}{\texttt{latentnet}}
+% \opt sets an option or effect name in typewriter type and lets long names break after ( : , _ and / so that they do not run into the next table column
+\ExplSyntaxOn
+\tl_new:N \l__nwlsm_opt_tl
+\NewDocumentCommand{\opt}{m}
+  {
+    \tl_set:Nn \l__nwlsm_opt_tl {#1}
+    \regex_replace_all:nnN { ([\:\,]) } { \1 \c{allowbreak}\cB\{\cE\} } \l__nwlsm_opt_tl
+    \regex_replace_all:nnN { \c{\_} } { \c{\_} \c{allowbreak}\cB\{\cE\} } \l__nwlsm_opt_tl
+    \regex_replace_all:nnN { ([a-z])([A-Z]) } { \1 \c{allowbreak}\cB\{\cE\} \2 } \l__nwlsm_opt_tl
+    \regex_replace_all:nnN { (/) } { \1 \c{allowbreak}\cB\{\cE\} } \l__nwlsm_opt_tl
+    \regex_replace_all:nnN { ([\|\(\[=]) } { \1 \c{allowbreak}\cB\{\cE\} } \l__nwlsm_opt_tl
+    \texttt{ \tl_use:N \l__nwlsm_opt_tl }
+  }
+\ExplSyntaxOff
+% the listing of the output of an example (manual/ex/out/<name>.txt, written by the do-files of manual/ex)
+\newcommand{\showlog}[1]{\lstinputlisting{ex/out/#1.txt}}
+\newcommand{\inc}[1]{\typeout{>>>#1}\input{#1}}
+\newcommand{\manualseries}{1.0}
+% The manual is labelled by the minor series (valid for 1.0.x): change \manualseries only for a new minor or major release whose documented behaviour changed.
+\newcommand{\pkgversion}{1.0.0}
+\newcommand{\pkgdate}{20 November 2026}
+% Exact version and date of the release that produced the listings (rerun the examples when it changes).
+% DOI of the archived manual (Zenodo). PLACEHOLDER: no record exists yet; put the all-versions DOI of the new record here (for example 10.5281/zenodo.NNNNNNN) after the upload and rebuild. Nothing is printed for an empty DOI.
+\newcommand{\manualdoi}{10.5281/zenodo.24398243}% DOI of the Zenodo record
+\newcommand{\citedoi}{\ifdefempty{\manualdoi}{}{ Zenodo. \url{https://doi.org/\manualdoi}}}
+\title{\textbf{nwlsm}\\[4pt]\large Latent space models for networks in Stata\\ (a package that builds on \texttt{nwcommands})\\[6pt]\normalsize User manual and reference}
+\author{Thomas U. Grund\\ RWTH Aachen University}
+\date{This manual describes \texttt{nwlsm} \manualseries.x\\ (examples produced with \texttt{nwlsm} \pkgversion, \pkgdate)}
+\begin{document}
+\maketitle
+\begin{quote}\noindent\textbf{How to cite.} This manual describes the series~\manualseries{} of \nwlsm{} (it holds for all versions \manualseries.x); the listings were produced with version~\pkgversion{} (\pkgdate). It is the citable reference for the package. Please cite it as:\par\smallskip
+\noindent Grund, T.~U. (2026). \emph{nwlsm: Latent space models for networks in Stata. Manual.}\citedoi\par\smallskip
+\noindent Please also report the exact version of the program that produced your results, as printed by \texttt{nwlsm version} and stored in \texttt{e(version)}.
+\end{quote}
+\chapter*{Acknowledgments}\addcontentsline{toc}{chapter}{Acknowledgments}
+\nwlsm{} follows the R package \latentnet{} of Pavel Krivitsky and Mark Handcock~\cite{krivitsky2008,latentnetpkg} and exists because of it. The latent space model is due to Hoff, Raftery and Handcock~\cite{hoff2002}; the latent cluster model, the minimum Kullback-Leibler positions and the BIC for the number of clusters are those of Handcock, Raftery and Tantrum~\cite{handcock2007}, and the random sender, receiver and sociality effects are those of Krivitsky and co-authors~\cite{krivitsky2009}. The latent space model for social influence is the model of Sweet and Adhikari~\cite{sweet2020}. The Stata code, including the sampler in the C plugin, was written independently from these publications; no code of \latentnet{} is included, and its results are the reference against which the code was checked.
+
+\nwlsm{} is not affiliated with or endorsed by the authors of \latentnet{}, and its errors are the author's. It is meant for researchers who work in Stata or prefer it to R. It is not a replacement for \latentnet{}, which is the more mature and the more widely used program and remains the reference implementation.
+
+\paragraph{Use of an AI coding assistant.} The software was developed with Claude Code (Anthropic), an AI coding assistant, working under the author's direction. It helped port the method into Stata, Mata and C and helped write the tests. The author specified the scope, reviewed the code, and is responsible for the package. Its correctness rests on validation, not on the assistant: the likelihoods and updates are compared with direct recomputations, the posterior summaries with those of \latentnet{}, the sampler with simulations from known parameters, and the test suite reruns these comparisons.
+
+\tableofcontents
+\inc{ch01_intro}
+\inc{ch02_model}
+\inc{ch03_start}
+\inc{ch04_options}
+\inc{ch05_effects}
+\inc{ch06_clusters}
+\inc{ch07_valued}
+\inc{ch08_influence}
+\inc{ch09_postest}
+\inc{ch10_diagnostics}
+\inc{ch11_plots}
+\inc{ch12_compare}
+\inc{ch13_validation}
+\inc{ch14_limits}
+\begin{thebibliography}{99}
+\bibitem{hoff2002} Hoff, P.D., Raftery, A.E., Handcock, M.S. (2002). Latent space approaches to social network analysis. \emph{Journal of the American Statistical Association} 97(460), 1090--1098.
+\bibitem{handcock2007} Handcock, M.S., Raftery, A.E., Tantrum, J.M. (2007). Model-based clustering for social networks. \emph{Journal of the Royal Statistical Society, Series A} 170(2), 301--354.
+\bibitem{krivitsky2008} Krivitsky, P.N., Handcock, M.S. (2008). Fitting position latent cluster models for social networks with latentnet. \emph{Journal of Statistical Software} 24(5), 1--23.
+\bibitem{krivitsky2009} Krivitsky, P.N., Handcock, M.S., Raftery, A.E., Hoff, P.D. (2009). Representing degree distributions, clustering, and homophily in social networks with latent cluster random effects models. \emph{Social Networks} 31(3), 204--213.
+\bibitem{latentnetpkg} Krivitsky, P.N., Handcock, M.S. \emph{latentnet: Latent Position and Cluster Models for Statistical Networks.} R package. \url{https://CRAN.R-project.org/package=latentnet}
+\bibitem{sweet2020} Sweet, T.M., Adhikari, S. (2020). A latent space network model for social influence. \emph{Psychometrika} 85(1), 251--274.
+\bibitem{geyer1992} Geyer, C.J. (1992). Practical Markov chain Monte Carlo. \emph{Statistical Science} 7(4), 473--483.
+\bibitem{geweke1992} Geweke, J. (1992). Evaluating the accuracy of sampling-based approaches to the calculation of posterior moments. In: Bernardo, J.M., Berger, J.O., Dawid, A.P., Smith, A.F.M. (eds.), \emph{Bayesian Statistics 4}, 169--193. Oxford: Oxford University Press.
+\bibitem{gelman1992} Gelman, A., Rubin, D.B. (1992). Inference from iterative simulation using multiple sequences. \emph{Statistical Science} 7(4), 457--472.
+\bibitem{roberts1997} Roberts, G.O., Gelman, A., Gilks, W.R. (1997). Weak convergence and optimal scaling of random walk Metropolis algorithms. \emph{The Annals of Applied Probability} 7(1), 110--120.
+\bibitem{zachary1977} Zachary, W.W. (1977). An information flow model for conflict and fission in small groups. \emph{Journal of Anthropological Research} 33(4), 452--473.
+\bibitem{sampson1969} Sampson, S.F. (1969). \emph{Crisis in a Cloister.} Unpublished doctoral dissertation, Cornell University.
+\bibitem{lazega2001} Lazega, E. (2001). \emph{The Collegial Phenomenon: The Social Mechanisms of Cooperation Among Peers in a Corporate Law Partnership}. Oxford: Oxford University Press.
+\end{thebibliography}
+\end{document}

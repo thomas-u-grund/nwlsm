@@ -1,0 +1,14 @@
+. nwlsmselect lazega_fr, clusters(0 2 3 4) absdiff(seniority) seed(12)
+
+Selection of the number of latent clusters by BIC (as latentnet's bic.ergmm), network laze
+> ga_fr
+------------------------------------------------------------------------
+  Clusters         BIC     BIC (Y)     BIC (Z) Mean loglik   BIC - min
+------------------------------------------------------------------------
+         2    3446.369    3023.501     422.869   -1549.918       0.000  <- best
+         3    3453.313    3022.987     430.326   -1549.786       6.943
+         0    3461.241    3015.589     445.652   -1548.046      14.872
+         4    3461.394    3025.423     435.971   -1550.745      15.025
+------------------------------------------------------------------------
+Sorted by BIC, smaller is better; 0 clusters is the model without clusters. The BIC
+compares fits to the same network with the same options.

@@ -1,0 +1,15 @@
+. quietly nwlsm zachary_bin, dim(2) chains(2) threads(1) seed(5) nsample(1000) burnin(2000
+> )
+
+. matrix b1 = e(b)
+
+. display "threads(1): _cons = " %9.6f b1[1,1]
+threads(1): _cons =  1.060491
+
+. quietly nwlsm zachary_bin, dim(2) chains(2) threads(2) seed(5) nsample(1000) burnin(2000
+> )
+
+. matrix b2 = e(b)
+
+. display "threads(2): _cons = " %9.6f b2[1,1]
+threads(2): _cons =  1.060491

@@ -16,4 +16,5 @@ specified the scope, reviewed the code, and is responsible for the package. Its 
 
 ## How to cite
 
-Grund, T. U. (2026). nwlsm: a Stata package (version 1.0.1).
+Grund, T. U. (2026). nwlsm: Latent space models for networks in Stata. Manual. Zenodo. https://doi.org/10.5281/zenodo.24398243
+The DOI is the one of all versions of the manual. Please also report the exact version of the package that produced your results, as printed by `nwlsm version`.
