@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 0.7.0  19nov2026 author: Thomas Grund}{...}
+{* *! version 1.0.0  20nov2026 author: Thomas Grund}{...}
 {title:Title}
 
 {p2colset 9 17 24 2}{...}
@@ -319,4 +319,4 @@ the R-squared of the posterior mean predictions with and without the influence t
 {p 4 8 2}Krivitsky, P. N., Handcock, M. S., Raftery, A. E. and Hoff, P. D. 2009. Representing degree distributions, clustering, and homophily in social networks with latent cluster random effects models. Social Networks 31: 204-213.{p_end}
 
 {hline}
-{pstd}{it:nwlsm version 0.7.0, 19 November 2026}{p_end}{* nwversion}
+{pstd}{it:nwlsm version 1.0.0, 20 November 2026}{p_end}{* nwversion}

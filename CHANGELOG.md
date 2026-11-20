@@ -1,6 +1,7 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.0] - 2026-11-20
+- First stable release: the syntax, the stored results and the options are kept from here on within 1.x.
 - `nwlsmplot`: new options `arrows` / `noarrows` (ties of directed networks as arrows from sender to receiver, the default for directed networks; shortened to the border of the marker), `clustermeans` and `circles` (posterior mean cluster means and circles with the square root of the posterior mean cluster variance as radius, as `plot.means` and `plot.vars` of latentnet's `plot.ergmm()`; fits with `clusters()`), `certainty` (with `clusters`: opacity of the markers by the largest posterior membership probability, four steps), `draws(#)` (a faint cloud of `#` evenly spaced posterior draws of the positions, centred and rotated or reflected to the minimum Kullback-Leibler positions; needs the draws still in memory from the last fit, checked against `e(Zmean)`), `labsize()`, `labposition()`, `noaxes`, `export(filename [, options])` (graph export; `saving()` works as a twoway option). Cluster colours of `clusters` now follow the cluster number.
 - `nwlsmselect`: `graph`, `gname()`, `gopts()` plot the BIC and its parts (ties, positions, random effects) against the number of clusters.
 - Dialogs: new `nwlsmselect.dlg` (opened from a button in `nwlsm.dlg`, as `nwlsm_estat.dlg` and `nwlsmplot.dlg`; the package has one menu entry in the core); the new options in `nwlsmplot.dlg`; `nwlsmselect.dlg` in `nwlsm.pkg`.

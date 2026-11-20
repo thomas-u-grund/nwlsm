@@ -1,4 +1,4 @@
-*! version 0.7.0  19nov2026 nwlsmselect
+*! version 1.0.0  20nov2026 nwlsmselect
 * Copyright (C) 2026 Thomas U. Grund. Part of nwlsm; GNU GPL-3 (see LICENSE).
 
 capture program drop nwlsmselect
