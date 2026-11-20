@@ -5,6 +5,8 @@
 - Output that wrapped at `linesize 80` fits now: the table of `estat mcmcdiag` (82 columns before, 74 with the Rhat column, 65 without; the Rhat header printed as "Rh/at"), the acceptance-rate line, the titles of `estat gof`, `estat ppcheck` (and its line of scores), `estat clusters` and `nwlsmselect`, and the summary line of `estat bic`.
 - Mata library rebuilt (Stata 17): `lsm_geweke()`. Test `cscripts/test_nwlsm_mcmcdiag.do` (converged runs with 1, 4 and 8 chains are not flagged, a short run is, no wrapped output at linesize 80).
 
+Tested on macOS with Stata 17 BE: the tests of the package including the new `test_nwlsm_mcmcdiag` and the dialog assembly test. On Linux (Ubuntu 22.04) and Windows 11 (both StataNow 19.5 MP): all test files pass. Stata 18 not run.
+
 ## [1.0.2] - 2026-11-20
 - `edgecov()` with a network, or with a matrix that has a missing diagonal (as the matrix of a network from `nwtomata` has), no longer stops with "edge covariates must not have missing values" (r(416)): the diagonal of a one-mode matrix is not a dyad and is ignored (set to 0); missing values off the diagonal are still an error. Test `cscripts/test_nwlsm_edgecov.do`.
 
