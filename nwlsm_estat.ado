@@ -1,4 +1,4 @@
-*! version 1.0.0  20nov2026 nwlsm_estat
+*! version 1.0.1  20nov2026 nwlsm_estat
 * Copyright (C) 2026 Thomas U. Grund. Part of nwlsm; GNU GPL-3 (see LICENSE).
 
 capture program drop nwlsm_estat

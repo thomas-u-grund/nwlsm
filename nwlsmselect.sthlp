@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 1.0.0  20nov2026 author: Thomas Grund}{...}
+{* *! version 1.0.1  20nov2026 author: Thomas Grund}{...}
 {title:Title}
 
 {p2colset 9 22 29 2}{...}
@@ -47,4 +47,4 @@ The BIC is a rough guide: latentnet itself warns that it is not certain to be ap
 {p 4 8 2}Krivitsky, P. N. and Handcock, M. S. 2008. Fitting position latent cluster models for social networks with latentnet. Journal of Statistical Software 24(5).{p_end}
 
 {hline}
-{pstd}{it:nwlsm version 1.0.0, 20 November 2026}{p_end}{* nwversion}
+{pstd}{it:nwlsm version 1.0.1, 20 November 2026}{p_end}{* nwversion}
