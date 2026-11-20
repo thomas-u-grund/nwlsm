@@ -572,10 +572,11 @@ real scalar lsm_ess(real colvector x)
 	return(min((S, S / gam)))
 }
 
-// Geweke z-score: first 10% of the series against the last 50%; the variance of each mean uses the effective sample size of its segment
+// Geweke z-score: first 10% of the series against the last 50%; the variance of each mean uses the integrated autocorrelation time of the
+// whole series (S / ESS): the effective sample size of a segment of a few dozen draws is estimated too optimistically (z far too large)
 real scalar lsm_geweke(real colvector x)
 {
-	real scalar S, na, nb, va, vb
+	real scalar S, na, nb, va, vb, tau
 	real colvector a, b
 
 	S = rows(x)
@@ -583,8 +584,9 @@ real scalar lsm_geweke(real colvector x)
 	nb = max((2, floor(0.5 * S)))
 	a = x[1..na]
 	b = x[(S - nb + 1)..S]
-	va = variance(a) / lsm_ess(a)
-	vb = variance(b) / lsm_ess(b)
+	tau = S / lsm_ess(x)
+	va = variance(a) * tau / na
+	vb = variance(b) * tau / nb
 	if (va + vb <= 0) return(0)
 	return((mean(a) - mean(b)) / sqrt(va + vb))
 }

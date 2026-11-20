@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.0.3] - 2026-11-20
+- `estat mcmcdiag`: the Geweke warning no longer raises false alarms with several chains. The printed z of a row is still the one of largest size over the chains; the warning compares the largest |z| of all rows with the two-sided 5 percent normal quantile with Bonferroni correction for the number of z values (parameters times chains, for example 2.87 for 3 parameters and 4 chains) instead of 2, and a warning is shown when the smallest effective sample size is below 100. The variance of the two segment means of the z uses the autocorrelation time of the whole chain (the effective sample size of a short first segment was estimated too high, so z was too large in settled multi-chain runs). New stored results `r(geweke_max)`, `r(geweke_crit)`, `r(geweke_ntests)`, `r(geweke_flag)`, `r(ess_min)`, `r(ess_flag)`.
+- Output that wrapped at `linesize 80` fits now: the table of `estat mcmcdiag` (82 columns before, 74 with the Rhat column, 65 without; the Rhat header printed as "Rh/at"), the acceptance-rate line, the titles of `estat gof`, `estat ppcheck` (and its line of scores), `estat clusters` and `nwlsmselect`, and the summary line of `estat bic`.
+- Mata library rebuilt (Stata 17): `lsm_geweke()`. Test `cscripts/test_nwlsm_mcmcdiag.do` (converged runs with 1, 4 and 8 chains are not flagged, a short run is, no wrapped output at linesize 80).
+
 ## [1.0.2] - 2026-11-20
 - `edgecov()` with a network, or with a matrix that has a missing diagonal (as the matrix of a network from `nwtomata` has), no longer stops with "edge covariates must not have missing values" (r(416)): the diagonal of a one-mode matrix is not a dyad and is ignored (set to 0); missing values off the diagonal are still an error. Test `cscripts/test_nwlsm_edgecov.do`.
 

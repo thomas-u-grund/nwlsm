@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 1.0.2  20nov2026 author: Thomas Grund}{...}
+{* *! version 1.0.3  20nov2026 author: Thomas Grund}{...}
 {title:Title}
 
 {p2colset 9 17 24 2}{...}
@@ -229,7 +229,8 @@ With {opt generate()} the coordinates go into the variables {it:stub}1, {it:stub
 
 {phang}
 {cmd:estat mcmcdiag} [{cmd:, nolist graph name(}{it:name}{cmd:)}] shows, for the coefficients, the log likelihood and the variance parameters, the posterior mean and standard deviation, the effective sample size
-(initial monotone positive sequence estimator of Geyer), the Geweke z-score (first 10 percent of the draws against the last 50 percent) and, with several chains, the Gelman-Rubin statistic, and returns them in {cmd:r(diag)}. It needs the draws of the last fit, which stay in memory. With {opt graph} the trace plots of all these quantities are drawn (one line per chain, with the Gelman-Rubin statistic in the title) and combined into one graph.
+(initial monotone positive sequence estimator of Geyer), the Geweke z-score (first 10 percent of the draws against the last 50 percent; the variance of the two means uses the autocorrelation time of the whole chain) and, with several chains, the Gelman-Rubin statistic, and returns them in {cmd:r(diag)}.
+The Geweke z of a row is the one of largest size over the chains. The table ends with a rule: the largest |z| of all rows is compared with the two-sided 5 percent normal quantile with Bonferroni correction for the number of z values tested (parameters times chains; for 3 parameters and 4 chains 2.87 instead of 1.96), because the largest of many z values exceeds 1.96 in a settled run; a warning is shown when it is exceeded. A second warning is shown when the smallest effective sample size is below 100. Returned: {cmd:r(geweke_max)}, {cmd:r(geweke_crit)}, {cmd:r(geweke_ntests)}, {cmd:r(geweke_flag)} (1 if the Geweke warning is shown), {cmd:r(ess_min)} and {cmd:r(ess_flag)}. The Geweke test is a rough screen, not a proof of convergence: look at the trace plots ({opt graph}) and at the Gelman-Rubin statistic as well. It needs the draws of the last fit, which stay in memory. With {opt graph} the trace plots of all these quantities are drawn (one line per chain, with the Gelman-Rubin statistic in the title) and combined into one graph.
 
 {phang}
 {cmd:estat clusters} [{cmd:, generate(}{it:stub}{cmd:) nolist}] (after {opt clusters()}) lists the posterior membership probabilities and the classification and returns them in {cmd:r(Q)} and {cmd:r(class)}. With {opt generate()} the variables
@@ -326,4 +327,4 @@ A user manual (PDF in the {cmd:manual} folder of the package source) is archived
 {p 4 8 2}Krivitsky, P. N., Handcock, M. S., Raftery, A. E. and Hoff, P. D. 2009. Representing degree distributions, clustering, and homophily in social networks with latent cluster random effects models. Social Networks 31: 204-213.{p_end}
 
 {hline}
-{pstd}{it:nwlsm version 1.0.2, 20 November 2026}{p_end}{* nwversion}
+{pstd}{it:nwlsm version 1.0.3, 20 November 2026}{p_end}{* nwversion}

@@ -1,4 +1,4 @@
-*! version 1.0.2  20nov2026 nwlsmselect
+*! version 1.0.3  20nov2026 nwlsmselect
 * Copyright (C) 2026 Thomas U. Grund. Part of nwlsm; GNU GPL-3 (see LICENSE).
 
 capture program drop nwlsmselect
@@ -52,7 +52,7 @@ program nwlsmselect, rclass
 	local bestG = `T'[`bi', 1]
 	if "`nolist'" == "" {
 		di
-		di as text "Selection of the number of latent clusters by BIC (as latentnet's bic.ergmm), network {bf:`netname'}"
+		di as text "{p 0 2 2}Selection of the number of latent clusters by BIC (as latentnet's bic.ergmm), network {bf:`netname'}{p_end}"
 		di as text "{hline 72}"
 		di as text %10s "Clusters" %12s "BIC" %12s "BIC (Y)" %12s "BIC (Z)" %12s "Mean loglik" %12s "BIC - min"
 		di as text "{hline 72}"

@@ -1,4 +1,4 @@
-*! version 1.0.2  20nov2026 nwlsm_estat
+*! version 1.0.3  20nov2026 nwlsm_estat
 * Copyright (C) 2026 Thomas U. Grund. Part of nwlsm; GNU GPL-3 (see LICENSE).
 
 capture program drop nwlsm_estat
@@ -175,41 +175,62 @@ program _nwlsm_mcmcdiag, rclass
 	matrix rownames `R' = `nm'
 	matrix colnames `R' = ess geweke mean sd rhat
 	local S = e(nsample)
+	* Geweke rule: the printed z of a row is the largest |z| over the chains; the flag compares the largest of all rows with the
+	* Bonferroni-corrected two-sided normal quantile for the number of tested z values (parameters x chains)
+	local NP : word count `nm'
+	local ntest = `NP' * `C'
+	local gcrit = invnormal(1 - 0.05 / (2 * `ntest'))
+	local gmax = 0
+	local essmin = .
+	forvalues k = 1/`NP' {
+		if abs(`R'[`k', 2]) > `gmax' local gmax = abs(`R'[`k', 2])
+		if `R'[`k', 1] < `essmin' local essmin = `R'[`k', 1]
+	}
+	local esslow = 100
+	local gflag = (`gmax' > `gcrit')
+	local eflag = (`essmin' < `esslow')
+	local tw = cond(`C' > 1, 74, 65)
 	if "`nolist'" == "" {
 		di
 		di as text "MCMC diagnostics (" as result e(nsample) as text " draws" _c
 		if `C' > 1 di as text " in " as result `C' as text " chains" _c
 		di as text ", interval " as result e(interval) as text ")"
-		di as text "{hline 76}"
-		di as text %-22s "Parameter" %10s "Mean" %10s "Sd" %10s "ESS" %10s "ESS/draw" %10s "Geweke z" _c
-		if `C' > 1 di as text %10s "Rhat" _c
+		di as text "{hline `tw'}"
+		di as text %-20s "Parameter" %9s "Mean" %9s "Sd" %9s "ESS" %9s "ESS/draw" %9s "Geweke z" _c
+		if `C' > 1 di as text %9s "Rhat" _c
 		di
-		di as text "{hline 76}"
+		di as text "{hline `tw'}"
 		local k 0
 		foreach c of local nm {
 			local ++k
-			di as text %-22s abbrev("`c'", 21) as result %10.4f `R'[`k', 3] %10.4f `R'[`k', 4] %10.1f `R'[`k', 1] %10.3f `R'[`k', 1] / `S' %10.2f `R'[`k', 2] _c
-			if `C' > 1 di as result %10.3f `R'[`k', 5] _c
+			di as text %-20s abbrev("`c'", 19) as result %9.4f `R'[`k', 3] %9.4f `R'[`k', 4] %9.1f `R'[`k', 1] %9.3f `R'[`k', 1] / `S' %9.2f `R'[`k', 2] _c
+			if `C' > 1 di as result %9.3f `R'[`k', 5] _c
 			di
 		}
-		di as text "{hline 76}"
+		di as text "{hline `tw'}"
 		tempname A
 		matrix `A' = e(tuning)
-		di as text "Acceptance rates: positions " as result %5.3f `A'[1, 1] _c
+		local acc "Acceptance rates: positions `: di %5.3f `A'[1, 1]'"
 		local k 1
 		foreach c in `e(covariates)' {
 			local ++k
-			di as text ", `c' " as result %5.3f `A'[1, `k'] _c
+			local acc `"`acc', `c' `: di %5.3f `A'[1, `k']'"'
 		}
 		local k = wordcount("`e(covariates)'") + 1
 		local j 0
 		foreach t in sender receiver sociality {
 			local ++j
-			if `: list t in effs' di as text ", `t' " as result %5.3f `A'[1, `k' + `j'] _c
+			if `: list t in effs' local acc `"`acc', `t' `: di %5.3f `A'[1, `k' + `j']'"'
 		}
-		di
-		di as text "{p 0 0 2}ESS: effective sample size by the initial monotone positive sequence estimator. Geweke z: first 10% of the draws against the last 50%; |z| above 2 suggests that the chain has not settled.{p_end}"
+		di as text `"{p 0 2 2}`acc'{p_end}"'
+		di as text "{p 0 0 2}ESS: effective sample size by the initial monotone positive sequence estimator. Geweke z: first 10% of the draws against the last 50%.{p_end}"
 		if `C' > 1 di as text "{p 0 0 2}With `C' chains: ESS is the sum over the chains, Geweke z the value of largest size over the chains, Rhat the Gelman-Rubin potential scale reduction factor (values close to 1, say below 1.1, indicate that the chains agree).{p_end}"
+		local gtxt : di %4.2f `gmax'
+		local ctxt : di %4.2f `gcrit'
+		local cs = cond(`C' > 1, "s", "")
+		local verdict = cond(`gflag', "Warning: the chain may not have settled.", "No sign that the chain has not settled.")
+		di as text "{p 0 0 2}Geweke rule: the largest |z| (`gtxt') is compared with `ctxt', the two-sided 5% normal quantile with Bonferroni correction for the `ntest' z values (`NP' parameters, `C' chain`cs'). `verdict'{p_end}"
+		if `eflag' di as error "{p 0 0 2}Warning: the smallest effective sample size (" %5.1f `essmin' ") is below `esslow'; run longer (nsample(), interval()) before reading the estimates.{p_end}"
 	}
 	if "`graph'" != "" {
 		if "`name'" == "" local name "mcmcdiag"
@@ -249,6 +270,12 @@ program _nwlsm_mcmcdiag, rclass
 		capture matrix drop __nwlsm_trace
 		di as txt "{p 0 0 2}(trace plots saved as {bf:`name'}; one line per chain)"
 	}
+	return scalar geweke_max = `gmax'
+	return scalar geweke_crit = `gcrit'
+	return scalar geweke_ntests = `ntest'
+	return scalar geweke_flag = `gflag'
+	return scalar ess_min = `essmin'
+	return scalar ess_flag = `eflag'
 	return matrix diag = `R'
 end
 
@@ -321,7 +348,7 @@ program _nwlsm_clusters, rclass
 	}
 	if "`nolist'" == "" {
 		di
-		di as text "Latent clusters: posterior membership probabilities (labels corrected over the draws)"
+		di as text "{p 0 2 2}Latent clusters: posterior membership probabilities (labels corrected over the draws){p_end}"
 		local line = 16 + 8 + 10 * `G'
 		di as text "{hline `line'}"
 		di as text %-16s "Actor" %8s "Class" _c
@@ -517,7 +544,7 @@ program _nwlsm_gof, rclass
 		matrix colnames `P' = obs min mean max MC_p-value
 		matrix rownames `P' = `labs'
 		di
-		di as txt "Goodness of fit: `d_`t'' (" as res `nsim' as txt " networks simulated from the posterior)"
+		di as txt "{p 0 2 2}Goodness of fit: `d_`t'' ({res}`nsim'{txt} networks simulated from the posterior){p_end}"
 		di as txt "{hline `=`w'+1'}{c TT}{hline 52}"
 		di as txt %`w's "`hd'" " {c |}" %10s "Observed" %10s "Min" %10s "Mean" %10s "Max" %12s "MC p-value"
 		di as txt "{hline `=`w'+1'}{c +}{hline 52}"
@@ -627,7 +654,7 @@ program _nwlsm_ppcheck, rclass
 	local ng = rowsof(`T')
 	if "`nolist'" == "" {
 		di
-		di as text "Posterior predictive check: observed " cond("`fam'" == "bernoulli", "ties", "values") " against the posterior mean " cond("`fam'" == "bernoulli", "tie probabilities", "expected values") " (`fam' family)"
+		di as text "{p 0 2 2}Posterior predictive check: observed " cond("`fam'" == "bernoulli", "ties", "values") " against the posterior mean " cond("`fam'" == "bernoulli", "tie probabilities", "expected values") " (`fam' family){p_end}"
 		di as text "{hline 50}"
 		di as text %8s "Group" %12s "Dyads" %15s "Predicted" %15s "Observed"
 		di as text "{hline 50}"
@@ -635,12 +662,12 @@ program _nwlsm_ppcheck, rclass
 			di as result %8.0f `i' %12.0f `T'[`i', 1] %15.4f `T'[`i', 2] %15.4f `T'[`i', 3]
 		}
 		di as text "{hline 50}"
-		di as text "Observed dyads: " as result %8.0f `SM'[1, 1] _c
+		di as text "Observed dyads: " as result %6.0f `SM'[1, 1] _c
 		if "`fam'" == "bernoulli" {
-			di as text "  Brier score: " as result %7.4f `SM'[1, 2] as text "  AUC: " as result %7.4f `SM'[1, 3] as text "  mean log loss: " as result %7.4f `SM'[1, 4]
+			di as text "  Brier score: " as result %6.4f `SM'[1, 2] as text "  AUC: " as result %6.4f `SM'[1, 3] as text "  mean log loss: " as result %6.4f `SM'[1, 4]
 		}
 		else {
-			di as text "  RMSE: " as result %9.4f `SM'[1, 2] as text "  correlation: " as result %7.4f `SM'[1, 3] as text "  mean absolute error: " as result %9.4f `SM'[1, 4]
+			di as text "  RMSE: " as result %7.4f `SM'[1, 2] as text "  correlation: " as result %6.4f `SM'[1, 3] as text "  MAE: " as result %7.4f `SM'[1, 4]
 		}
 		di as text "{p 0 0 2}Dyads are sorted by their posterior mean prediction and cut into `groups' groups of about equal size; a well calibrated model has the observed mean close to the predicted one in every group.{p_end}"
 	}
@@ -850,7 +877,7 @@ program _nwlsm_bic, rclass
 		di as text "{hline 44}"
 		di as text %-24s "Overall" as result %20.3f `ob'
 		di as text "{hline 44}"
-		di as text "Latent clusters: " as result `G' as text "; coefficients: " as result `R'[1, 7] as text "; effective number of observations (" "`effname'" "): " as result `R'[1, 10]
+		di as text "{p 0 2 2}Latent clusters: {res}`G'{txt}; coefficients: {res}`=`R'[1, 7]'{txt}; effective number of observations (`effname'): {res}`=`R'[1, 10]'{txt}{p_end}"
 		di as text "{p 0 0 2}Smaller is better. The BIC compares models fitted to the same network; it is not certain that it is appropriate for choosing the dimension, the random effects or between a clustered and an unclustered model.{p_end}"
 	}
 	return scalar bic = `ob'
