@@ -61,6 +61,27 @@ assert _rc == 198
 assert _N == `N0'
 describe, short
 
+* ---- equal scale: aspect = y range / x range, equal padding, so one unit has the same length on both axes; noequal and aspectratio() work
+quietly nwlsm und, dim(2) clusters(2) seed(3) nsample(400) burnin(500)
+nwlsmplot, clusters circles clustermeans draws(30) name(e1)
+assert abs(r(aspect) - (r(ymax) - r(ymin)) / (r(xmax) - r(xmin))) < 1e-9
+assert r(xmax) > r(xmin) & r(ymax) > r(ymin)
+* the range includes the circles: mean +- radius lies inside
+matrix CM = e(cmeans)
+matrix VS = e(vsummary)
+forvalues g = 1/2 {
+	assert CM[`g', 1] - sqrt(VS[`g', 1]) >= r(xmin) & CM[`g', 1] + sqrt(VS[`g', 1]) <= r(xmax)
+	assert CM[`g', 2] - sqrt(VS[`g', 1]) >= r(ymin) & CM[`g', 2] + sqrt(VS[`g', 1]) <= r(ymax)
+}
+lsmt_gexists e1
+nwlsmplot, noequal clusters circles name(e2)
+assert r(aspect) == .
+lsmt_gexists e2
+nwlsmplot, aspectratio(0.5) name(e3)
+lsmt_gexists e3
+nwlsmplot, noaxes name(e4)
+lsmt_gexists e4
+
 * ---- fit without clusters: cluster options are errors
 quietly nwlsm und, dim(2) seed(3) nsample(300) burnin(300)
 foreach o in clustermeans circles "clusters certainty" {

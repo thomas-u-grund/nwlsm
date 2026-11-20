@@ -44,7 +44,8 @@ BEGIN
   CHECKBOX cx_cert 20 388 500 ., label("opacity by certainty of the membership (needs by cluster)")
   TEXT tx_note2 20 416 520 ., label("The draws stay in memory after nwlsm until the next fit.")
   GROUPBOX gb_out 10 458 540 100, label("Graph")
-  CHECKBOX cx_noax 20 478 220 ., label("no axes")
+  CHECKBOX cx_noax 20 478 110 ., label("no axes")
+  CHECKBOX cx_noeq 130 478 120 ., label("not equal scale")
   TEXT tx_name 250 478 100 ., label("Graph name:")
   EDIT ed_name 350 478 150 ., nomem
   TEXT tx_exp 20 508 200 ., label("Export to file (.png, .pdf, ...):")
@@ -119,6 +120,9 @@ BEGIN
 	}
 	if main.cx_noax {
 		put " noaxes"
+	}
+	if main.cx_noeq {
+		put " noequal"
 	}
 	if main.fi_exp.isneq("") {
 		put " export(" main.fi_exp ")"

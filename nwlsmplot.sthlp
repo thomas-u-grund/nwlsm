@@ -33,6 +33,7 @@
 {synopt :{opt cert:ainty}}with {opt clusters}: opacity of the markers by the certainty of the cluster membership, the largest posterior membership probability {cmd:e(Q)} (four steps){p_end}
 {synopt :{opt draws(#)}}draw a faint cloud of {it:#} (1 to 1000) evenly spaced posterior draws of the positions under the actors{p_end}
 {synopt :{opt noax:es}}draw no axes{p_end}
+{synopt :{opt noeq:ual}}do not force equal scales: the plot is square and each axis spans its own range (by default one unit has the same length on both axes){p_end}
 {synopt :{opt exp:ort(filename [, options])}}export the graph with {help graph export}, replacing an existing file; the extension of {it:filename} sets the format{p_end}
 {synopt :{opt name(name)}}name of the graph{p_end}
 {synopt :{it:twoway_options}}other options of {help twoway}, such as {cmd:title()}, {cmd:scheme()} or {cmd:saving()}{p_end}
@@ -44,7 +45,7 @@
 {cmd:nwlsmplot} draws the positions of the actors after {cmd:nwlsm} in the plane of two latent dimensions. The ties of the network are drawn as light lines (an undirected
 tie once, a directed tie as an arrow from sender to receiver, or with {opt noarrows} as a line). {opt color()}, {opt size()} and {opt label()} take variables with one observation per
 actor, in the order of the actors of the network, as the other plot commands of the family do. The positions are identified only up to rotation and reflection, so that the
-orientation of the axes carries no meaning.
+orientation of the axes carries no meaning. Because only distances carry meaning, the two axes have the same scale (one unit is equally long on both), so that distances and the variance circles are drawn undistorted; the plot region takes the shape of the range of the points, circles, draws and cluster means. {opt noequal} switches this off; an {opt aspectratio()} given as a twoway option replaces the equal-scale aspect ratio.
 
 {pstd}
 {opt draws()} shows the uncertainty of the positions: the draws of the sampler kept by the last {cmd:nwlsm} fit are centred and rotated or reflected to the minimum Kullback-Leibler

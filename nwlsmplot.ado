@@ -2,11 +2,11 @@
 * Copyright (C) 2026 Thomas U. Grund. Part of nwlsm; GNU GPL-3 (see LICENSE).
 
 capture program drop nwlsmplot
-program nwlsmplot
+program nwlsmplot, rclass
 	version 14
 	syntax [, DIMs(numlist integer min=2 max=2 >=1) MEAN COLor(varname) SIZE(string) LABel(varname) NOEDGES CLUSters ///
 		EDGEColor(string) EDGEWidth(string) MSIZE(string) NAME(string) ARRows NOARRows CLUSTERMeans CIRCles DRAWs(integer 0) CERTainty ///
-		LABSize(string) LABPosition(string) NOAXes EXPort(string asis) *]
+		LABSize(string) LABPosition(string) NOAXes NOEQual EXPort(string asis) *]
 	if "`e(cmd)'" != "nwlsm" error 301
 	tempname Z E
 	if "`mean'" != "" matrix `Z' = e(Zmean)
@@ -333,12 +333,68 @@ program nwlsmplot
 	if strpos(`"`options'"', "title(") local ttl
 	local axopt `"xtitle("dimension `d1'") ytitle("dimension `d2'") xlabel(, grid) ylabel(, grid)"'
 	if "`noaxes'" != "" local axopt `"xtitle("") ytitle("") xscale(off) yscale(off) xlabel(none) ylabel(none)"'
-	twoway `plots', `axopt' `ttl' aspectratio(1) `legend' ///
+	* equal scale: the same data range (plus the same padding) on both axes' range lengths, aspect ratio = y range / x range, so that one unit
+	* has the same length on x and y (distances are the content of a latent space; circles stay round)
+	local aspopt "aspectratio(1)"
+	if "`noequal'" == "" {
+		quietly summarize x, meanonly
+		local xlo = r(min)
+		local xhi = r(max)
+		quietly summarize y, meanonly
+		local ylo = r(min)
+		local yhi = r(max)
+		foreach v in ex1 ex2 dx cx mx {
+			quietly summarize `v', meanonly
+			if r(N) > 0 {
+				local xlo = min(`xlo', r(min))
+				local xhi = max(`xhi', r(max))
+			}
+		}
+		foreach v in ey1 ey2 dy cy my {
+			quietly summarize `v', meanonly
+			if r(N) > 0 {
+				local ylo = min(`ylo', r(min))
+				local yhi = max(`yhi', r(max))
+			}
+		}
+		local xr = max(`xhi' - `xlo', 1e-6)
+		local yr = max(`yhi' - `ylo', 1e-6)
+		local pad = 0.06 * max(`xr', `yr')
+		local xlo = `xlo' - `pad'
+		local xhi = `xhi' + `pad'
+		local ylo = `ylo' - `pad'
+		local yhi = `yhi' + `pad'
+		local asp = (`yhi' - `ylo') / (`xhi' - `xlo')
+		* tick labels inside the range, with one step on both axes (a label outside the range would widen the axis and break the equal scale)
+		local raw = max(`xhi' - `xlo', `yhi' - `ylo') / 6
+		local mag = 10^floor(log10(`raw'))
+		local fr = `raw' / `mag'
+		local step = `mag' * cond(`fr' <= 1.5, 1, cond(`fr' <= 3.5, 2, cond(`fr' <= 7.5, 5, 10)))
+		local xl
+		forvalues k = `=ceil(`xlo' / `step')'/`=floor(`xhi' / `step')' {
+			local xl `xl' `=`k' * `step''
+		}
+		local yl
+		forvalues k = `=ceil(`ylo' / `step')'/`=floor(`yhi' / `step')' {
+			local yl `yl' `=`k' * `step''
+		}
+		local aspopt "aspectratio(`asp') xscale(range(`xlo' `xhi')) yscale(range(`ylo' `yhi'))"
+		if "`xl'" != "" & "`yl'" != "" & "`noaxes'" == "" local axopt `"xtitle("dimension `d1'") ytitle("dimension `d2'") xlabel(`xl', grid) ylabel(`yl', grid)"'
+	}
+	if strpos(`"`options'"', "aspectratio(") | strpos(`"`options'"', "aspect(") local aspopt
+	twoway `plots', `axopt' `ttl' `aspopt' `legend' ///
 		`=cond("`name'" != "", "name(`name', replace)", "")' `options'
 	if `"`export'"' != "" {
 		gettoken __fn __ex : export, parse(",")
 		local __ex = trim(substr(`"`__ex'"', 2, .))
 		graph export `__fn', replace `__ex'
+	}
+	if "`noequal'" == "" {
+		return scalar aspect = `asp'
+		return scalar xmin = `xlo'
+		return scalar xmax = `xhi'
+		return scalar ymin = `ylo'
+		return scalar ymax = `yhi'
 	}
 	restore
 end
