@@ -273,7 +273,7 @@ program _nwlsm_mcmcdiag, rclass
 		local ctxt : di %4.2f `gcrit'
 		local etxt : di %3.1f `gexp'
 		local cs = cond(`C' > 1, "s", "")
-		di as text "{p 0 0 2}Geweke z: first 10% of the draws against the last 50%, as {cmd:geweke.diag()} of R's coda (spectral density at frequency zero of each part from an autoregressive fit); |z| > `ctxt' is the nominal two-sided 5% limit. `nexceed' of the `ntest' z values (`NP' parameters, `C' chain`cs') exceed it (largest |z| `gtxt'); about `etxt' (5%) would exceed it by chance with long settled chains, and more with short chains (a first part of a few dozen draws gives a noisy z), so read the z values together with the trace plots ({opt graph}) and the effective sample sizes; they are no test of convergence{p_end}"
+		di as text "{p 0 0 2}Geweke z: first 10% of the draws against the last 50%, as {cmd:geweke.diag()} of R's coda (spectral density at frequency zero of each part from an autoregressive fit); |z| > `ctxt' is the nominal two-sided 5% limit. `nexceed' of the `ntest' z values (`NP' parameters, `C' chain`cs') exceed it (largest |z| `gtxt'); about `etxt' (5%) would exceed it by chance with long settled chains, and more with short chains (a first part of a few dozen draws gives a noisy z), so read the z values together with the trace plots ({opt graph}) and the effective sample sizes; they are no test of convergence.{p_end}"
 		if `eflag' di as error "{p 0 0 2}Warning: the smallest effective sample size (" %5.1f `essmin' ") is below `esslow'; run longer (nsample(), interval()) before reading the estimates.{p_end}"
 	}
 	if "`graph'" != "" {
