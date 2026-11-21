@@ -114,3 +114,36 @@ while r(eof) == 0 {
 file close `fh'
 assert `bad' == 0
 di "PASS: no wrapped output at linesize 80"
+
+* (4) the Mean and Sd columns never print in scientific notation (the log likelihood, about -1550 on lazega_fr, needs 10 characters with
+* four decimals: 1.0.3 to 1.0.4 printed -1.55e+03)
+capture nwwebuse lazega, nwclear
+if _rc == 0 {
+capture log close __sci
+log using "$LSM_SCRATCH/sci_mcmcdiag.log", text replace name(__sci)
+set linesize 80
+foreach C in 1 4 8 {
+	quietly nwlsm lazega_fr, dim(2) chains(`C') nsample(1000) burnin(500) seed(5)
+	estat mcmcdiag
+}
+log close __sci
+set linesize 255
+file open `fh' using "$LSM_SCRATCH/sci_mcmcdiag.log", read text
+local nll 0
+local nsci 0
+local nplain 0
+file read `fh' line
+while r(eof) == 0 {
+	if substr(`"`line'"', 1, 6) == "loglik" {
+		local ++nll
+		if strpos(`"`line'"', "e+") | strpos(`"`line'"', "e-") local ++nsci
+		if regexm(`"`line'"', "^loglik +-[0-9][0-9][0-9][0-9]\.[0-9]+ +[0-9]") local ++nplain
+	}
+	file read `fh' line
+}
+file close `fh'
+assert `nll' >= 3   // the table of every fit; with 8 chains the table of the Geweke z by chain has a loglik row too
+assert `nsci' == 0 & `nplain' == 3
+di "PASS: loglik row of estat mcmcdiag in plain decimals at 1, 4 and 8 chains"
+}
+else display "lazega not loaded (rc `=_rc'), loglik format check skipped"

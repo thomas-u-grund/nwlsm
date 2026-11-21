@@ -1,4 +1,4 @@
-*! version 1.0.4  21nov2026 nwlsm_estat
+*! version 1.0.5  21nov2026 nwlsm_estat
 * Copyright (C) 2026 Thomas U. Grund. Part of nwlsm; GNU GPL-3 (see LICENSE).
 
 capture program drop nwlsm_estat
@@ -226,7 +226,17 @@ program _nwlsm_mcmcdiag, rclass
 		local k 0
 		foreach c of local nm {
 			local ++k
-			di as text %-20s abbrev("`c'", 19) as result %9.4f `R'[`k', 3] %9.4f `R'[`k', 4] %9.1f `R'[`k', 1] %9.3f `R'[`k', 1] / `S' %9.2f `R'[`k', 2] _c
+			* Mean and Sd: decimals chosen so that the number fits 9 characters (sign included) and never turns to scientific notation
+			local fm3 "%9.0f"
+			local fm4 "%9.0f"
+			foreach j in 3 4 {
+				local av = abs(`R'[`k', `j'])
+				if `av' < 100000 local fm`j' "%9.1f"
+				if `av' < 10000 local fm`j' "%9.2f"
+				if `av' < 100 local fm`j' "%9.3f"
+				if `av' < 10 local fm`j' "%9.4f"
+			}
+			di as text %-20s abbrev("`c'", 19) as result `fm3' `R'[`k', 3] `fm4' `R'[`k', 4] %9.1f `R'[`k', 1] %9.3f `R'[`k', 1] / `S' %9.2f `R'[`k', 2] _c
 			if `C' > 1 di as result %9.3f `R'[`k', 5] _c
 			di
 		}
