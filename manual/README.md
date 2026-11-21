@@ -7,7 +7,7 @@
 The manual's title and citation carry no version number; the title page states the series it describes (`\manualseries`, valid for 1.0.x). The exact version and date of the release that produced the listings are two more macros in `nwlsm_manual.tex`, and the tag appears in the installation sentence of `ch01_intro.tex`:
 
     \newcommand{\manualseries}{1.0}
-    \newcommand{\pkgversion}{1.0.0}
+    \newcommand{\pkgversion}{1.0.4}
     \newcommand{\pkgdate}{20 November 2026}
 
 Change `\manualseries` only for a new minor or major release whose documented behaviour changed. For a patch release rebuild (`make -C manual pdf`) and rerun the examples if their output changed.

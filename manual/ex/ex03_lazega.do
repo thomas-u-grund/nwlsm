@@ -24,9 +24,7 @@ log using out/lazega_gof.txt, text replace
 estat gof, gof(distance) nsim(100) seed(1)
 log close
 log using out/lazega_edgecov.txt, text replace
-nwtomata lazega_adv, mat(ADVM)
-mata: _diag(ADVM, 0); st_matrix("ADV", ADVM)
-nwlsm lazega_fr, dim(2) edgecov(ADV) seed(12)
+nwlsm lazega_fr, dim(2) edgecov(lazega_adv) seed(12)
 log close
 log using out/lazega_time.txt, text replace
 timer clear

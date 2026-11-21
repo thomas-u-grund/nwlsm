@@ -9,7 +9,7 @@
 
 Contains data from draws_karate.dta
  Observations:           500
-    Variables:             3                  20 Nov 2026 14:41
+    Variables:             3                  21 Nov 2026 07:39
 Sorted by:
 
 . summarize beta_cons loglik, separator(0)

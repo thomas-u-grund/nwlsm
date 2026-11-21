@@ -1,22 +1,41 @@
 . estat mcmcdiag
 
 MCMC diagnostics (2000 draws in 2 chains, interval 10)
-----------------------------------------------------------------------------
-Parameter                   Mean        Sd       ESS  ESS/draw  Geweke z      Rhat
-----------------------------------------------------------------------------
-_cons                     1.4620    0.0937     271.8     0.136      1.77     1.000
-y_cons                    0.4484    0.0662    1022.7     0.511     -0.78     1.004
-y_ylag                    0.5433    0.0757     620.7     0.310      1.10     1.000
-y_x                      -0.3264    0.0832    1031.4     0.516      0.95     1.000
-y_influence               1.1514    0.1873     516.5     0.258      0.71     1.000
-loglik                -1863.0509    7.9832     732.9     0.366      0.77     1.001
-sigma2                    2.2934    0.3246     852.6     0.426      1.95     1.000
-sigma2_y                  0.1555    0.0593     379.6     0.190      0.49     1.000
-----------------------------------------------------------------------------
+--------------------------------------------------------------------------
+Parameter                Mean       Sd      ESS ESS/draw Geweke z     Rhat
+--------------------------------------------------------------------------
+_cons                  1.4620   0.0937    271.8    0.136     1.77    1.000
+y_cons                 0.4484   0.0662   1022.7    0.511    -0.76    1.004
+y_ylag                 0.5433   0.0757    620.7    0.310     1.32    1.000
+y_x                   -0.3264   0.0832   1031.4    0.516     1.06    1.000
+y_influence            1.1514   0.1873    516.5    0.258     0.87    1.000
+loglik              -1.86e+03   7.9832    732.9    0.366     0.98    1.001
+sigma2                 2.2934   0.3246    852.6    0.426     2.12    1.000
+sigma2_y               0.1555   0.0593    379.6    0.190     0.40    1.000
+--------------------------------------------------------------------------
 Acceptance rates: positions 0.233, _cons 0.245
-ESS: effective sample size by the initial monotone positive sequence estimator. Geweke
-z: first 10% of the draws against the last 50%; |z| above 2 suggests that the chain has
-not settled.
-With 2 chains: ESS is the sum over the chains, Geweke z the value of largest size over
-the chains, Rhat the Gelman-Rubin potential scale reduction factor (values close to 1,
-say below 1.1, indicate that the chains agree).
+ESS: effective sample size by the initial monotone positive sequence estimator.
+With 2 chains: ESS is the sum over the chains, Geweke z (above) the value of largest
+size over the chains, Rhat the Gelman-Rubin potential scale reduction factor (values
+close to 1, say below 1.1, indicate that the chains agree).
+
+Geweke z by chain
+------------------------------
+Parameter       chain1  chain2
+------------------------------
+_cons             1.77    1.04
+y_cons           -0.39   -0.76
+y_ylag           -0.17    1.32
+y_x               0.62    1.06
+y_influence      -0.16    0.87
+loglik            0.08    0.98
+sigma2            2.12    0.91
+sigma2_y          0.40   -0.26
+------------------------------
+Geweke z: first 10% of the draws against the last 50%, as geweke.diag() of R's coda
+(spectral density at frequency zero of each part from an autoregressive fit); |z| > 1.96
+is the nominal two-sided 5% limit. 1 of the 16 z values (8 parameters, 2 chains) exceed
+it (largest |z| 2.12); about 0.8 (5%) would exceed it by chance with long settled
+chains, and more with short chains (a first part of a few dozen draws gives a noisy z),
+so read the z values together with the trace plots (graph) and the effective sample
+sizes; they are no test of convergence.

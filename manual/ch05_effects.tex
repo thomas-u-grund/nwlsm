@@ -9,9 +9,9 @@ This chapter uses the friendship network of the 71 lawyers of the Lazega law fir
 \showlog{lazega_fit}
 The coefficient of \texttt{absdiff\_seniority} is $-0.012$ (95\% interval $-0.018$ to $-0.005$ in the log odds per rank of difference): lawyers who are closer in seniority are somewhat more likely to name each other, once the latent distance is accounted for. The variance of the positions is 2.4.
 
-\opt{edgecov(list)} takes edge covariates: networks of the same actors, or Stata matrices with one row and one column per actor. The value $x_{ij}$ of the matrix is the covariate of the tie from $i$ to $j$. An edge covariate must not have missing values, and a matrix made from a network by \texttt{nwtomata} has missing values on its diagonal; set the diagonal to 0 first (the diagonal is not used, because self-loops are ignored). Here the advice network is the covariate: is a friendship tie more likely where one lawyer asks the other for advice?
+\opt{edgecov(list)} takes edge covariates: networks of the same actors, or Stata matrices with one row and one column per actor. The value $x_{ij}$ of the matrix is the covariate of the tie from $i$ to $j$. An edge covariate must not have missing values off the diagonal; the diagonal of a one-mode matrix is not a dyad and is ignored (self-loops are ignored), so a network can be given by its name directly. Here the advice network is the covariate: is a friendship tie more likely where one lawyer asks the other for advice?
 \showlog{lazega_edgecov}
-The coefficient 2.54 is large: a tie in the advice network multiplies the odds of a friendship tie by about $e^{2.54}\approx 12.7$, given the positions. The coefficient is named after the matrix (\texttt{edgecov\_ADV}); several covariates can be listed, and the same covariate must not be listed twice.
+The coefficient 2.54 is large: a tie in the advice network multiplies the odds of a friendship tie by about $e^{2.54}\approx 12.7$, given the positions. The coefficient is named after the covariate (\texttt{edgecov\_lazega\_adv}); several covariates can be listed, and the same covariate must not be listed twice.
 
 \section{Random sender, receiver and sociality effects}
 

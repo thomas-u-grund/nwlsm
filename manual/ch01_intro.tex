@@ -25,7 +25,7 @@ A latent space is a summary of the network, not a measurement of anything. The p
 
 \begin{lstlisting}
 . net install nwlsm, from(https://raw.githubusercontent.com/thomas-u-grund/nwlsm/main/)
-. net install nwlsm, from(https://raw.githubusercontent.com/thomas-u-grund/nwlsm/v1.0.0/) replace
+. net install nwlsm, from(https://raw.githubusercontent.com/thomas-u-grund/nwlsm/v1.0.4/) replace
 \end{lstlisting}
 
 Updating the core never overwrites \nwlsm{}, and updating \nwlsm{} never changes the core. To check the installation:
@@ -38,4 +38,4 @@ The output shows the release and, in \texttt{r(version)}, the string to quote wh
 
 Chapter~\ref{ch:model} states the model and what the sampler does, Chapter~\ref{ch:start} the data and the syntax, and Chapter~\ref{ch:options} the options. Chapters~\ref{ch:effects} to~\ref{ch:influence} are worked examples for the covariates and random effects, the latent clusters, valued networks and the influence model. Chapters~\ref{ch:postest} to~\ref{ch:compare} cover post-estimation, diagnostics, plots and the comparison of models, Chapter~\ref{ch:validation} the validation against \latentnet{} and Chapter~\ref{ch:limits} the limits. The complete reference is the help files: \texttt{help nwlsm}, \texttt{help nwlsmselect} and \texttt{help nwlsmplot}.
 
-All listings are real output of the program (version~\pkgversion{}, with version 3.29.0 of the core, under Stata 17 on macOS). The commands carry a seed, so that every listing can be reproduced. The data sets are loaded with \texttt{nwwebuse} from the website of the package family: Zachary's karate club~\cite{zachary1977}, Sampson's monastery~\cite{sampson1969} and the Lazega law firm~\cite{lazega2001}. The influence example uses simulated data, made in the do-file of the example.
+All listings are real output of the program (version~\pkgversion{}, with version 3.33.0 of the core, under Stata 17 on macOS). The commands carry a seed, so that every listing can be reproduced. The data sets are loaded with \texttt{nwwebuse} from the website of the package family: Zachary's karate club~\cite{zachary1977}, Sampson's monastery~\cite{sampson1969} and the Lazega law firm~\cite{lazega2001}. The influence example uses simulated data, made in the do-file of the example.

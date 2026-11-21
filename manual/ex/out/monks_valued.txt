@@ -98,8 +98,8 @@ above 1.
 
 . estat ppcheck
 
-Posterior predictive check: observed values against the posterior mean expected values (bi
-> nomial family)
+Posterior predictive check: observed values against the posterior mean expected values
+  (binomial family)
 --------------------------------------------------
    Group       Dyads      Predicted       Observed
 --------------------------------------------------
@@ -114,8 +114,7 @@ Posterior predictive check: observed values against the posterior mean expected 
        9          31         1.2533         1.1935
       10          31         1.8752         2.4839
 --------------------------------------------------
-Observed dyads:      306  RMSE:    0.6884  correlation:  0.7241  mean absolute error:    0
-> .4619
+Observed dyads:    306  RMSE:  0.6884  correlation: 0.7241  MAE:  0.4619
 Dyads are sorted by their posterior mean prediction and cut into 10 groups of about
 equal size; a well calibrated model has the observed mean close to the predicted one in
 every group.

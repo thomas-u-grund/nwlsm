@@ -1,7 +1,7 @@
 . nwlsmselect lazega_fr, clusters(0 2 3 4) absdiff(seniority) seed(12)
 
-Selection of the number of latent clusters by BIC (as latentnet's bic.ergmm), network laze
-> ga_fr
+Selection of the number of latent clusters by BIC (as latentnet's bic.ergmm), network
+  lazega_fr
 ------------------------------------------------------------------------
   Clusters         BIC     BIC (Y)     BIC (Z) Mean loglik   BIC - min
 ------------------------------------------------------------------------

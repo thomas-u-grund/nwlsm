@@ -21,4 +21,4 @@ probabilities e(P). Positions are identified up to rotation, reflection and tran
 only.
 
 . display "version: " e(version)
-version: 1.0.0
+version: 1.0.4
