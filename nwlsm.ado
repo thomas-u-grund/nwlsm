@@ -1,4 +1,4 @@
-*! version 1.0.4  21nov2026 nwlsm
+*! version 1.0.5  21nov2026 nwlsm
 * Copyright (C) 2026 Thomas U. Grund
 * This file is part of nwlsm, a Stata package for latent space models for networks. It follows the latent space model of
 * Hoff, Raftery and Handcock (2002) as implemented in the R package latentnet (Krivitsky and Handcock) and is written independently.
@@ -387,7 +387,7 @@ program nwlsm, eclass
 	matrix colnames `VT' = mean sd mcse lower95 upper95
 	ereturn post `B' `V', obs(`__ny')
 	ereturn local cmd "nwlsm"
-	ereturn local version "1.0.4"
+	ereturn local version "1.0.5"
 	ereturn local estat_cmd "nwlsm_estat"
 	ereturn local title "`=cond(`__io', "Latent space model for social influence", "Latent space model")' (`=cond("`bilinear'" != "", "bilinear", "Euclidean distance")'; `__famname' family), posterior by MCMC"
 	ereturn local latent = cond("`bilinear'" != "", "bilinear", "euclidean")
@@ -550,8 +550,10 @@ program _nwlsm_display
 		di as text "Latent clusters: " as result e(clusters)
 	}
 	else if e(chains) > 1 di
-	di as text "Posterior mean log likelihood: " as result %9.3f e(ll_mean) as text " (sd " as result %6.3f e(ll_sd) as text ")" _c
-	if "`e(influence)'" == "yes" di as text "  outcome: " as result %9.3f e(ll_outcome) _c
+	local fmll = cond(abs(e(ll_mean)) < 10000, "%9.3f", "%10.2f")  // no scientific notation for large log likelihoods
+	local fmlo = cond(abs(e(ll_outcome)) < 10000 | e(ll_outcome) >= ., "%9.3f", "%10.2f")
+	di as text "Posterior mean log likelihood: " as result `fmll' e(ll_mean) as text " (sd " as result %6.3f e(ll_sd) as text ")" _c
+	if "`e(influence)'" == "yes" di as text "  outcome: " as result `fmlo' e(ll_outcome) _c
 	di
 	di as text "{hline 78}"
 	di as text _col(25) %10s "Mean" %10s "Sd" %10s "MC s.e." %11s "Lower 95%" %10s "Upper 95%"

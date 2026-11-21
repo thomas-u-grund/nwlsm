@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 1.0.4  21nov2026 author: Thomas Grund}{...}
+{* *! version 1.0.5  21nov2026 author: Thomas Grund}{...}
 {title:Title}
 
 {p2colset 9 17 24 2}{...}
@@ -331,4 +331,4 @@ A user manual (PDF in the {cmd:manual} folder of the package source) is archived
 {p 4 8 2}Krivitsky, P. N., Handcock, M. S., Raftery, A. E. and Hoff, P. D. 2009. Representing degree distributions, clustering, and homophily in social networks with latent cluster random effects models. Social Networks 31: 204-213.{p_end}
 
 {hline}
-{pstd}{it:nwlsm version 1.0.4, 21 November 2026}{p_end}{* nwversion}
+{pstd}{it:nwlsm version 1.0.5, 21 November 2026}{p_end}{* nwversion}
