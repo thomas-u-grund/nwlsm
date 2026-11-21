@@ -1,4 +1,4 @@
-*! version 1.0.3  20nov2026 nwlsmplot
+*! version 1.0.4  21nov2026 nwlsmplot
 * Copyright (C) 2026 Thomas U. Grund. Part of nwlsm; GNU GPL-3 (see LICENSE).
 
 capture program drop nwlsmplot

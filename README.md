@@ -1,6 +1,6 @@
 # nwlsm
 
-<!--version-->**Version 1.0.3** (released 20 November 2026)<!--/version-->
+<!--version-->**Version 1.0.4** (released 21 November 2026)<!--/version-->
 
 Latent space models for networks in Stata, fitted by MCMC with a native C plugin. Part of the nwcommands family; requires the core package
 `nwcommands` (3.26.0 or later). Free software, GPL-3. Follows the latent space model of Hoff, Raftery and Handcock (2002) as implemented in

@@ -44,6 +44,8 @@ capture mata: mata drop LsmSample()
 capture mata: mata drop LsmSaveDraws()
 capture mata: mata drop lsm_ess()
 capture mata: mata drop lsm_geweke()
+capture mata: mata drop lsm_spec0()
+capture mata: mata drop LsmGewekeZ()
 capture mata: mata drop LsmDiag()
 capture mata: mata drop lsm_vartable()
 capture mata: mata drop LsmCheckMKL()
@@ -572,27 +574,91 @@ real scalar lsm_ess(real colvector x)
 	return(min((S, S / gam)))
 }
 
-// Geweke z-score: first 10% of the series against the last 50%; the variance of each mean uses the integrated autocorrelation time of the
-// whole series (S / ESS): the effective sample size of a segment of a few dozen draws is estimated too optimistically (z far too large)
+// Spectral density at frequency zero of a series as coda::spectrum0.ar(): an autoregression fitted by the Yule-Walker equations (Levinson-Durbin
+// recursion, as R's ar()) with the order chosen by AIC among 0..min(n - 1, floor(10 log10 n)); spec = var.pred / (1 - sum(ar))^2.
+// A series whose residuals from a linear trend have standard deviation below 1.5e-8 gets 0, as in coda.
+real scalar lsm_spec0(real colvector y)
+{
+	real scalar n, p, k, m, tm, b, sd, ord, sumar, vp, kk, acc, j
+	real colvector x, r, v, aic, t, res, a, anew
+	real matrix A
+
+	n = rows(y)
+	t = (1::n)
+	tm = (n + 1) / 2
+	res = y :- mean(y)
+	b = cross(t :- tm, res) / cross(t :- tm, t :- tm)
+	res = res - b * (t :- tm)
+	sd = sqrt(cross(res, res) / (n - 1))
+	if (sd < 1.5e-8) return(0)
+	p = min((n - 1, floor(10 * log10(n))))
+	if (p < 1) return(.)
+	x = y :- mean(y)
+	r = J(p + 1, 1, 0)
+	for (k = 0; k <= p; k++) r[k + 1] = cross(x[1..(n - k)], x[(k + 1)..n]) / n
+	if (r[1] == 0) return(0)
+	v = J(p + 1, 1, .)
+	aic = J(p + 1, 1, .)
+	A = J(p, p, 0)
+	a = J(p, 1, 0)
+	v[1] = r[1]
+	aic[1] = n * log(v[1]) + 2
+	for (m = 1; m <= p; m++) {
+		acc = r[m + 1]
+		for (j = 1; j < m; j++) acc = acc - a[j] * r[m - j + 1]
+		kk = acc / v[m]
+		anew = a
+		for (j = 1; j < m; j++) anew[j] = a[j] - kk * a[m - j]
+		anew[m] = kk
+		a = anew
+		A[m, .] = a'
+		v[m + 1] = v[m] * (1 - kk^2)
+		aic[m + 1] = n * log(v[m + 1]) + 2 * m + 2
+	}
+	ord = 0
+	for (k = 1; k <= p; k++) if (aic[k + 1] < aic[ord + 1]) ord = k
+	sumar = ord > 0 ? sum(A[ord, 1..ord]) : 0
+	vp = v[ord + 1] * n / (n - (ord + 1))
+	return(vp / (1 - sumar)^2)
+}
+
+// Geweke z-score as coda::geweke.diag(x, frac1 = 0.1, frac2 = 0.5) for one series: z = (mean1 - mean2) / sqrt(spec1 / n1 + spec2 / n2)
+// with the first 10% and the last 50% of the draws (the same index arithmetic as coda's window()) and the spectral density at frequency
+// zero of each segment from lsm_spec0(). Missing when the denominator is 0 (a series that does not move; coda returns NaN).
 real scalar lsm_geweke(real colvector x)
 {
-	real scalar S, na, nb, va, vb, tau
+	real scalar S, s2, e1, v
 	real colvector a, b
 
 	S = rows(x)
-	na = max((2, floor(0.1 * S)))
-	nb = max((2, floor(0.5 * S)))
-	a = x[1..na]
-	b = x[(S - nb + 1)..S]
-	tau = S / lsm_ess(x)
-	va = variance(a) * tau / na
-	vb = variance(b) * tau / nb
-	if (va + vb <= 0) return(0)
-	return((mean(a) - mean(b)) / sqrt(va + vb))
+	e1 = ceil(1 + 0.1 * (S - 1))
+	s2 = floor(S - 0.5 * (S - 1))
+	if (e1 < 3 | S - s2 + 1 < 3) return(.)
+	a = x[1..e1]
+	b = x[s2..S]
+	v = lsm_spec0(a) / rows(a) + lsm_spec0(b) / rows(b)
+	if (v == . | v <= 0) return(.)
+	return((mean(a) - mean(b)) / sqrt(v))
+}
+
+// Geweke z of every column of a draws matrix (C chains stored one after the other): a C x columns matrix, one z per chain and column
+real matrix LsmGewekeZ(real matrix x, | real scalar C)
+{
+	real scalar k, c, Sc
+	real matrix Z
+
+	if (args() < 2) C = 1
+	Sc = rows(x) / C
+	Z = J(C, cols(x), .)
+	for (k = 1; k <= cols(x); k++) {
+		for (c = 1; c <= C; c++) Z[c, k] = lsm_geweke(x[((c - 1) * Sc + 1)..(c * Sc), k])
+	}
+	return(Z)
 }
 
 // diagnostics of the columns of a draws matrix (C chains stored one after the other): (ESS, Geweke z, mean, sd, Gelman-Rubin R) per column.
-// ESS: sum over the chains; Geweke z: the value of the largest absolute size over the chains; R: missing for one chain.
+// ESS: sum over the chains; Geweke z: the value of the largest absolute size over the chains (see LsmGewekeZ() for all of them);
+// R: missing for one chain.
 real matrix LsmDiag(real matrix x, | real scalar C)
 {
 	real scalar k, c, Sc, z
@@ -604,12 +670,11 @@ real matrix LsmDiag(real matrix x, | real scalar C)
 	R = J(cols(x), 5, .)
 	for (k = 1; k <= cols(x); k++) {
 		R[k, 1] = 0
-		R[k, 2] = 0
 		for (c = 1; c <= C; c++) {
 			xc = x[((c - 1) * Sc + 1)..(c * Sc), k]
 			R[k, 1] = R[k, 1] + lsm_ess(xc)
 			z = lsm_geweke(xc)
-			if (abs(z) > abs(R[k, 2])) R[k, 2] = z
+			if (z < . & (R[k, 2] >= . | abs(z) > abs(R[k, 2]))) R[k, 2] = z
 		}
 		R[k, 3] = mean(x[., k])
 		R[k, 4] = sqrt(variance(x[., k]))

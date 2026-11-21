@@ -1,4 +1,4 @@
-*! version 1.0.3  20nov2026 nwlsm_estat
+*! version 1.0.4  21nov2026 nwlsm_estat
 * Copyright (C) 2026 Thomas U. Grund. Part of nwlsm; GNU GPL-3 (see LICENSE).
 
 capture program drop nwlsm_estat
@@ -132,7 +132,10 @@ program _nwlsm_mcmcdiag, rclass
 	if `C' >= . local C 1
 	local G = e(clusters)
 	if `G' >= . local G 0
-	mata: __nwlsm_dg = LsmDiag((LsmSample("beta"), LsmSample("ob"), LsmSample("llk"), LsmSample("s2")), `C')
+	mata: __nwlsm_dx = (LsmSample("beta"), LsmSample("ob"), LsmSample("llk"), LsmSample("s2"))
+	mata: __nwlsm_dg = LsmDiag(__nwlsm_dx, `C')
+	mata: __nwlsm_gz = LsmGewekeZ(__nwlsm_dx, `C')
+	capture mata: mata drop __nwlsm_dx
 	local nm `e(covariates)'
 	if "`e(influence)'" == "yes" {
 		foreach c in `e(ocovariates)' {
@@ -158,36 +161,58 @@ program _nwlsm_mcmcdiag, rclass
 			local ++k
 			if `: list t in effs' {
 				mata: __nwlsm_dg = __nwlsm_dg \ LsmDiag(LsmSample("ev")[., `k'], `C')
+				mata: __nwlsm_gz = __nwlsm_gz, LsmGewekeZ(LsmSample("ev")[., `k'], `C')
 				local nm `nm' `t'_var
 			}
 		}
 	}
 	if "`e(family)'" == "normal" {
 		mata: __nwlsm_dg = __nwlsm_dg \ LsmDiag(LsmSample("disp"), `C')
+		mata: __nwlsm_gz = __nwlsm_gz, LsmGewekeZ(LsmSample("disp"), `C')
 		local nm `nm' dispersion
 	}
 	if "`e(influence)'" == "yes" {
 		mata: __nwlsm_dg = __nwlsm_dg \ LsmDiag(LsmSample("os2"), `C')
+		mata: __nwlsm_gz = __nwlsm_gz, LsmGewekeZ(LsmSample("os2"), `C')
 		local nm `nm' sigma2_y
 	}
+	tempname GZ
 	mata: st_matrix("`R'", __nwlsm_dg)
+	mata: st_matrix("`GZ'", __nwlsm_gz)
 	capture mata: mata drop __nwlsm_dg
+	capture mata: mata drop __nwlsm_gz
 	matrix rownames `R' = `nm'
 	matrix colnames `R' = ess geweke mean sd rhat
 	local S = e(nsample)
-	* Geweke rule: the printed z of a row is the largest |z| over the chains; the flag compares the largest of all rows with the
-	* Bonferroni-corrected two-sided normal quantile for the number of tested z values (parameters x chains)
+	local rn
+	forvalues c = 1/`C' {
+		local rn `rn' chain`c'
+	}
+	matrix rownames `GZ' = `rn'
+	matrix colnames `GZ' = `nm'
+	* Geweke rule (as R users apply coda's geweke.diag()): a z-value (one per parameter and chain) is flagged when |z| > 1.96, the nominal
+	* two-sided 5% limit, without correction; the printed z of a row is the one of largest size over the chains. With k z-values about 0.05 k
+	* exceed 1.96 in a settled run, which the output says.
 	local NP : word count `nm'
-	local ntest = `NP' * `C'
-	local gcrit = invnormal(1 - 0.05 / (2 * `ntest'))
+	local ntest = 0
+	local nexceed = 0
 	local gmax = 0
 	local essmin = .
+	local gcrit = invnormal(0.975)
 	forvalues k = 1/`NP' {
-		if abs(`R'[`k', 2]) > `gmax' local gmax = abs(`R'[`k', 2])
+		forvalues c = 1/`C' {
+			local z = `GZ'[`c', `k']
+			if `z' < . {
+				local ++ntest
+				if abs(`z') > `gcrit' local ++nexceed
+				if abs(`z') > `gmax' local gmax = abs(`z')
+			}
+		}
 		if `R'[`k', 1] < `essmin' local essmin = `R'[`k', 1]
 	}
+	local gexp = 0.05 * `ntest'
 	local esslow = 100
-	local gflag = (`gmax' > `gcrit')
+	local gflag = (`nexceed' > 0)
 	local eflag = (`essmin' < `esslow')
 	local tw = cond(`C' > 1, 74, 65)
 	if "`nolist'" == "" {
@@ -223,13 +248,34 @@ program _nwlsm_mcmcdiag, rclass
 			if `: list t in effs' local acc `"`acc', `t' `: di %5.3f `A'[1, `k' + `j']'"'
 		}
 		di as text `"{p 0 2 2}`acc'{p_end}"'
-		di as text "{p 0 0 2}ESS: effective sample size by the initial monotone positive sequence estimator. Geweke z: first 10% of the draws against the last 50%.{p_end}"
-		if `C' > 1 di as text "{p 0 0 2}With `C' chains: ESS is the sum over the chains, Geweke z the value of largest size over the chains, Rhat the Gelman-Rubin potential scale reduction factor (values close to 1, say below 1.1, indicate that the chains agree).{p_end}"
+		di as text "{p 0 0 2}ESS: effective sample size by the initial monotone positive sequence estimator.{p_end}"
+		if `C' > 1 di as text "{p 0 0 2}With `C' chains: ESS is the sum over the chains, Geweke z (above) the value of largest size over the chains, Rhat the Gelman-Rubin potential scale reduction factor (values close to 1, say below 1.1, indicate that the chains agree).{p_end}"
+		if `C' > 1 & `C' <= 8 {
+			di
+			di as text "Geweke z by chain"
+			di as text "{hline `=14 + 8 * `C''}"
+			di as text %-14s "Parameter" _c
+			forvalues c = 1/`C' {
+				di as text %8s "chain`c'" _c
+			}
+			di
+			di as text "{hline `=14 + 8 * `C''}"
+			local k 0
+			foreach c of local nm {
+				local ++k
+				di as text %-14s abbrev("`c'", 13) _c
+				forvalues j = 1/`C' {
+					di as result %8.2f `GZ'[`j', `k'] _c
+				}
+				di
+			}
+			di as text "{hline `=14 + 8 * `C''}"
+		}
 		local gtxt : di %4.2f `gmax'
 		local ctxt : di %4.2f `gcrit'
+		local etxt : di %3.1f `gexp'
 		local cs = cond(`C' > 1, "s", "")
-		local verdict = cond(`gflag', "Warning: the chain may not have settled.", "No sign that the chain has not settled.")
-		di as text "{p 0 0 2}Geweke rule: the largest |z| (`gtxt') is compared with `ctxt', the two-sided 5% normal quantile with Bonferroni correction for the `ntest' z values (`NP' parameters, `C' chain`cs'). `verdict'{p_end}"
+		di as text "{p 0 0 2}Geweke z: first 10% of the draws against the last 50%, as {cmd:geweke.diag()} of R's coda (spectral density at frequency zero of each part from an autoregressive fit); |z| > `ctxt' is the nominal two-sided 5% limit. `nexceed' of the `ntest' z values (`NP' parameters, `C' chain`cs') exceed it (largest |z| `gtxt'); about `etxt' (5%) would exceed it by chance with long settled chains, and more with short chains (a first part of a few dozen draws gives a noisy z), so a few exceedances are no sign of trouble; many or large ones are: look at the trace plots ({opt graph}).{p_end}"
 		if `eflag' di as error "{p 0 0 2}Warning: the smallest effective sample size (" %5.1f `essmin' ") is below `esslow'; run longer (nsample(), interval()) before reading the estimates.{p_end}"
 	}
 	if "`graph'" != "" {
@@ -273,7 +319,9 @@ program _nwlsm_mcmcdiag, rclass
 	return scalar geweke_max = `gmax'
 	return scalar geweke_crit = `gcrit'
 	return scalar geweke_ntests = `ntest'
+	return scalar geweke_nexceed = `nexceed'
 	return scalar geweke_flag = `gflag'
+	return matrix geweke_z = `GZ'
 	return scalar ess_min = `essmin'
 	return scalar ess_flag = `eflag'
 	return matrix diag = `R'
