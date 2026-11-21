@@ -43,7 +43,6 @@ foreach C in 1 4 8 {
 	estat mcmcdiag
 	local np = rowsof(r(diag))
 	local k = `np' * `C'
-	assert abs(r(geweke_crit) - 1.959963984540054) < 1e-9
 	assert r(geweke_ntests) == `k'
 	* r(geweke_z): chains x parameters; the count and the maximum come from it; the printed column is the value of largest size per row
 	matrix Z = r(geweke_z)
@@ -51,7 +50,6 @@ foreach C in 1 4 8 {
 	mata: Z = st_matrix("Z"); st_numscalar("__ex", sum(abs(Z) :> 1.959963984540054)); st_numscalar("__mx", max(abs(Z)))
 	assert r(geweke_nexceed) == scalar(__ex)
 	assert reldif(r(geweke_max), scalar(__mx)) < 1e-12
-	assert r(geweke_flag) == (r(geweke_nexceed) > 0)
 	mata: D = st_matrix("r(diag)"); st_numscalar("__ok", all(abs(D[., 2]) :== rowmax(abs(Z'))))
 	assert scalar(__ok) == 1
 	* plausibility. One chain of 4000 draws: the count is within the binomial band of 5% (upper tail probability above 0.1%). Several chains
@@ -68,16 +66,17 @@ foreach C in 1 4 8 {
 assert `totex' < `totk' / 2
 di "PASS: " `totex' " of " `totk' " z values exceed 1.96 over the three runs (about " %3.1f 0.05 * `totk' " expected)"
 
-* a deliberately short run is flagged (|z| > 1.96 somewhere, or ESS < 100)
+* a deliberately short run: the ESS warning (the Geweke z is informational, there is no Geweke flag)
 quietly nwlsm dir, dim(2) nsample(60) burnin(0) interval(1) seed(3)
 estat mcmcdiag
-assert r(geweke_flag) == 1 | r(ess_flag) == 1
-assert r(ess_min) < 100 | r(geweke_flag) == 1
-di "PASS: short run flagged (geweke_flag " r(geweke_flag) ", ess_flag " r(ess_flag) ")"
+assert r(ess_flag) == 1 & r(ess_min) < 100
+capture confirm scalar r(geweke_flag)
+assert _rc != 0
+di "PASS: short run: ESS warning (ess_flag " r(ess_flag) "), no Geweke flag"
 * a run that is far from converged (a single chain of 400 draws that has hardly left its start): all three z values far beyond 1.96
 quietly nwlsm und, dim(2) chains(1) nsample(400) burnin(100) interval(1) seed(3)
 estat mcmcdiag
-assert r(geweke_nexceed) == 3 & r(geweke_flag) == 1 & r(geweke_max) > 5
+assert r(geweke_nexceed) == 3 & r(geweke_max) > 5
 di "PASS: non-converged run: " r(geweke_nexceed) " of " r(geweke_ntests) " |z| exceed 1.96, max " %5.2f r(geweke_max)
 
 * (3) no wrapped output at linesize 80

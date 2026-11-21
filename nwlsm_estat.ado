@@ -190,9 +190,8 @@ program _nwlsm_mcmcdiag, rclass
 	}
 	matrix rownames `GZ' = `rn'
 	matrix colnames `GZ' = `nm'
-	* Geweke rule (as R users apply coda's geweke.diag()): a z-value (one per parameter and chain) is flagged when |z| > 1.96, the nominal
-	* two-sided 5% limit, without correction; the printed z of a row is the one of largest size over the chains. With k z-values about 0.05 k
-	* exceed 1.96 in a settled run, which the output says.
+	* Geweke z is informational only (coda's geweke.diag(), one z per parameter and chain; the printed z of a row is the one of largest
+	* size over the chains): the output counts the z-values above 1.96 but gives no verdict, because 1.96 is not a 5% test with several chains.
 	local NP : word count `nm'
 	local ntest = 0
 	local nexceed = 0
@@ -212,7 +211,6 @@ program _nwlsm_mcmcdiag, rclass
 	}
 	local gexp = 0.05 * `ntest'
 	local esslow = 100
-	local gflag = (`nexceed' > 0)
 	local eflag = (`essmin' < `esslow')
 	local tw = cond(`C' > 1, 74, 65)
 	if "`nolist'" == "" {
@@ -275,7 +273,7 @@ program _nwlsm_mcmcdiag, rclass
 		local ctxt : di %4.2f `gcrit'
 		local etxt : di %3.1f `gexp'
 		local cs = cond(`C' > 1, "s", "")
-		di as text "{p 0 0 2}Geweke z: first 10% of the draws against the last 50%, as {cmd:geweke.diag()} of R's coda (spectral density at frequency zero of each part from an autoregressive fit); |z| > `ctxt' is the nominal two-sided 5% limit. `nexceed' of the `ntest' z values (`NP' parameters, `C' chain`cs') exceed it (largest |z| `gtxt'); about `etxt' (5%) would exceed it by chance with long settled chains, and more with short chains (a first part of a few dozen draws gives a noisy z), so a few exceedances are no sign of trouble; many or large ones are: look at the trace plots ({opt graph}).{p_end}"
+		di as text "{p 0 0 2}Geweke z: first 10% of the draws against the last 50%, as {cmd:geweke.diag()} of R's coda (spectral density at frequency zero of each part from an autoregressive fit); |z| > `ctxt' is the nominal two-sided 5% limit. `nexceed' of the `ntest' z values (`NP' parameters, `C' chain`cs') exceed it (largest |z| `gtxt'); about `etxt' (5%) would exceed it by chance with long settled chains, and more with short chains (a first part of a few dozen draws gives a noisy z), so read the z values together with the trace plots ({opt graph}) and the effective sample sizes; they are no test of convergence{p_end}"
 		if `eflag' di as error "{p 0 0 2}Warning: the smallest effective sample size (" %5.1f `essmin' ") is below `esslow'; run longer (nsample(), interval()) before reading the estimates.{p_end}"
 	}
 	if "`graph'" != "" {
@@ -317,10 +315,8 @@ program _nwlsm_mcmcdiag, rclass
 		di as txt "{p 0 0 2}(trace plots saved as {bf:`name'}; one line per chain)"
 	}
 	return scalar geweke_max = `gmax'
-	return scalar geweke_crit = `gcrit'
 	return scalar geweke_ntests = `ntest'
 	return scalar geweke_nexceed = `nexceed'
-	return scalar geweke_flag = `gflag'
 	return matrix geweke_z = `GZ'
 	return scalar ess_min = `essmin'
 	return scalar ess_flag = `eflag'
