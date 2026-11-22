@@ -644,7 +644,8 @@ static int mkl_lbfgs(const Model *g, const double *EY, double *x, int maxit, dou
 	enum { M = 10 };
 	int P = mkl_P(g), it, i, k, nh = 0, conv = 0, nsmall = 0;
 	double *gr, *gn, *xn, *dir, *S, *Y, *rho, *al, f, fn;
-	gr = malloc(sizeof(double) * P * 5); gn = gr + P; xn = gn + P; dir = xn + P; al = dir + P;
+	/* gr, gn, xn, dir hold P doubles each; al holds M doubles, and P can be smaller than M (few actors), so the block is sized for max(P, M) */
+	gr = malloc(sizeof(double) * ((size_t)P * 4 + (P > M ? (size_t)P : (size_t)M))); gn = gr + P; xn = gn + P; dir = xn + P; al = dir + P;
 	S = malloc(sizeof(double) * P * M * 2); Y = S + (size_t)P * M; rho = malloc(sizeof(double) * M);
 	if (!gr || !S || !rho) { free(gr); free(S); free(rho); *fout = 0; return -1; }
 	f = -mkl_fg(g, EY, x, gr, P);

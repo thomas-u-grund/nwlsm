@@ -1,5 +1,8 @@
 # Changelog
 
+## [Unreleased]
+- Fixed: heap overflow in the optimiser (`mkl_lbfgs`) for networks with fewer than 10 position coordinates (3 to 6 actors): could crash Stata (0xC0000374 on Windows). The work space of the L-BFGS memory (10 values) was carved from a block of 5 x P doubles, P being the number of coordinates, and overflowed for P < 10. Results for networks that did not crash are unchanged. The plugins of all platforms must be rebuilt from the fixed source. New test `cscripts/test_nwlsm_small.do` (3 to 6 actors, directed and undirected, several seeds).
+
 ## [1.0.5] - 2026-11-21
 - `estat mcmcdiag` printed means below -999.9999 (for example the log-likelihood) in scientific notation (-1.55e+03) since 1.0.3: fixed. The Mean and Sd columns now choose the number of decimals per value so that it fits the 9-character column (-1551.82); the table width is unchanged and all other cells are as before. The summary line of `nwlsm` no longer prints a posterior mean log likelihood of -10000 or below in scientific notation. Test `cscripts/test_nwlsm_mcmcdiag.do` (loglik row at 1, 4 and 8 chains).
 
