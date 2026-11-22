@@ -1,6 +1,8 @@
 # Changelog
 
 ## [Unreleased]
+- A network with no ties, or with every possible tie (binary; for `family(poisson)` and `family(binomial)` all observed values 0; diagonal ignored, missing dyads left out), prints the warning that the data carry no information on the intercept and its estimate is determined by the prior. New stored result `e(degenerate)` (1 or 0). Estimates and error codes unchanged. Test in `cscripts/test_nwlsm_small.do`.
+- Changed: the default number of threads (`threads(0)`) is now 4 threads for one chain and 2 threads per chain for several chains, at most one per processor core (it was one per core, all of them working inside the chain); more helper threads per chain made the passes over all dyads slower at about 200 actors. Results unchanged: the estimates do not depend on the number of threads. The error text of `threads()` states the default. New test `cscripts/test_nwlsm_threads_default.do`.
 - Fixed: heap overflow in the optimiser (`mkl_lbfgs`) for networks with fewer than 10 position coordinates (3 to 6 actors): could crash Stata (0xC0000374 on Windows). The work space of the L-BFGS memory (10 values) was carved from a block of 5 x P doubles, P being the number of coordinates, and overflowed for P < 10. Results for networks that did not crash are unchanged. The plugins of all platforms must be rebuilt from the fixed source. New test `cscripts/test_nwlsm_small.do` (3 to 6 actors, directed and undirected, several seeds).
 
 ## [1.0.5] - 2026-11-21

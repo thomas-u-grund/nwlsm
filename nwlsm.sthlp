@@ -53,7 +53,7 @@
 {synopt :{opt plen(#)}}sweeps in each tuning run; default {cmd:500}{p_end}
 {synopt :{opt mklstarts(#)}}number of starting points of the minimum Kullback-Leibler fit; default {cmd:4} with {opt sender}, {opt receiver} or {opt sociality}, otherwise {cmd:1}{p_end}
 {synopt :{opt chai:ns(#)}}number of independent chains, run in parallel and pooled; default {cmd:1}{p_end}
-{synopt :{opt thr:eads(#)}}number of threads; default: one per core of the computer; the result does not depend on it{p_end}
+{synopt :{opt thr:eads(#)}}number of threads; default {cmd:threads(0)}: 4 threads for one chain, 2 per chain for several chains, at most one per processor core; the result does not depend on it{p_end}
 {synopt :{opt seed(#)}}random-number seed (default: drawn from Stata's generator, so {cmd:set seed} makes a fit reproducible){p_end}
 {synopt :{opt randoms:tart}}random start positions instead of classical scaling{p_end}
 {synopt :{opt savedraws(filename)}}save the draws of the coefficients, the log likelihood and the variances to a Stata data set{p_end}
@@ -169,7 +169,8 @@ These matrices are stored when the number of actors fits into a Stata matrix.
 {synopt :{cmd:e(N)}}number of dyads (pairs for an undirected network){p_end}
 {synopt :{cmd:e(N_nodes)}}number of actors{p_end}
 {synopt :{cmd:e(dim)}, {cmd:e(nsample)}, {cmd:e(burnin)}, {cmd:e(interval)}, {cmd:e(seed)}, {cmd:e(mklstarts)}}settings of the run ({cmd:e(nsample)}: draws in all chains){p_end}
-{synopt :{cmd:e(chains)}, {cmd:e(nsample_chain)}, {cmd:e(threads)}, {cmd:e(clusters)}}number of chains, draws per chain, threads requested (0: one per core), number of latent clusters{p_end}
+{synopt :{cmd:e(chains)}, {cmd:e(nsample_chain)}, {cmd:e(threads)}, {cmd:e(clusters)}}number of chains, draws per chain, threads requested (0: the default described under threads()), number of latent clusters{p_end}
+{synopt :{cmd:e(degenerate)}}1 if the network has no ties or every possible tie (all observed values 0 for {cmd:family(poisson)} and {cmd:family(binomial)}), else 0; a red warning is printed then, since the data carry no information on the intercept and its estimate is determined by the prior{p_end}
 {synopt :{cmd:e(rhat)}}Gelman-Rubin statistics (several chains){p_end}
 {synopt :{cmd:e(Q)}, {cmd:e(class)}, {cmd:e(cmeans)}, {cmd:e(lambda)}}latent clusters: membership probabilities, classification, cluster centres, mixing proportions{p_end}
 {synopt :{cmd:e(ll_mean)}, {cmd:e(ll_sd)}}posterior mean and standard deviation of the log likelihood{p_end}
@@ -206,9 +207,9 @@ only rotation-invariant quantities are compared between chains: {cmd:estat mcmcd
 parameters, and {cmd:e(rhat)} holds it; values close to 1 (below 1.1, say) indicate that the chains agree. The minimum Kullback-Leibler fit uses the pooled draws.
 
 {pstd}
-{opt threads()} sets how many threads the plugin uses (default: one per core). Chains are distributed over the threads first. Threads that are left over (more threads than chains) work
+{opt threads()} sets how many threads the plugin uses. With the default, {cmd:threads(0)}, a single chain uses 4 threads, several chains use 2 threads per chain, and never more threads than the computer has processor cores (on a computer with one core, one thread); {cmd:threads(}{it:#}{cmd:)} with {it:#} > 0 is used as given. Chains are distributed over the threads first. Threads that are left over (more threads than chains) work
 inside a chain on the passes over all dyads (the updates of the coefficients) and on the minimum Kullback-Leibler fit, in networks of about 40 actors or more; the helper threads are created once and wait between the passes. A single chain cannot be
-made much faster than that, because its updates of the positions are sequential. The results for a given seed and {opt chains()} are exactly the same for every value of {opt threads()}.
+made much faster than that, because its updates of the positions are sequential. More helper threads per chain do not make the passes over all dyads faster in networks of about 200 actors, which is why the default is small. The results for a given seed and {opt chains()} are exactly the same for every value of {opt threads()}, including the default.
 
 {title:Latent clusters}
 

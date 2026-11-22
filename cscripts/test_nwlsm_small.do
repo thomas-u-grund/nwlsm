@@ -30,3 +30,39 @@ foreach n in 3 4 5 6 {
 }
 assert `nruns' == 24
 di "PASS test_nwlsm_small (`nruns' runs)"
+
+* degenerate networks (no tie / every tie): warning printed (red text in the log: checked through e(degenerate)), rc 0, finite e(b); an ordinary network: no warning
+foreach dir in 1 0 {
+	foreach full in 0 1 {
+		clear
+		set obs 8
+		forvalues j = 1/8 {
+			gen double __d`j' = `full'
+			qui replace __d`j' = 0 in `j'
+		}
+		local dtype = cond(`dir', "directed", "undirected")
+		nwset __d*, name(dg`dir'`full') `dtype'
+		capture noisily nwlsm dg`dir'`full', dim(2) clusters(0) nsample(30) burnin(30) pilot(1) plen(10) seed(1)
+		assert _rc == 0
+		assert e(degenerate) == 1
+		matrix __b = e(b)
+		forvalues k = 1/`=colsof(__b)' {
+			assert __b[1, `k'] < .
+		}
+		nwlsm
+		nwdrop dg`dir'`full'
+	}
+}
+clear
+set obs 8
+set seed 5
+forvalues j = 1/8 {
+	gen double __o`j' = runiform() < 0.4
+	qui replace __o`j' = 0 in `j'
+}
+qui replace __o2 = 1 in 1
+qui replace __o1 = 0 in 2
+nwset __o*, name(dgord) directed
+qui nwlsm dgord, dim(2) clusters(0) nsample(30) burnin(30) pilot(1) plen(10) seed(1)
+assert e(degenerate) == 0
+display as result "PASS degenerate networks"

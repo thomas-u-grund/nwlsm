@@ -83,8 +83,15 @@ program nwlsm, eclass
 		error 198
 	}
 	if `threads' < 0 | `threads' > 256 {
-		di as error "threads() must be between 1 and 256 (default: one thread per core, at most one per chain)"
+		di as error "threads() must be between 1 and 256 (default: 4 threads for one chain, 2 per chain for several chains, at most one per core of the computer)"
 		error 198
+	}
+	// Default number of threads (threads(0)): one chain gets 4 threads for its per-dyad passes, several chains 2 threads per chain, at most the processors of the machine.
+	// More helper threads per chain make the per-dyad passes slower, not faster (measured at 200 actors); the estimates do not depend on the number of threads.
+	local __thr = `threads'
+	if `__thr' == 0 {
+		local __thr = min(c(processors_mach), cond(`chains' == 1, 4, 2 * `chains'))
+		if `__thr' < 1 local __thr 1
 	}
 	if `clusters' != 0 & (`clusters' < 2 | `clusters' > 6) {
 		di as error "clusters() must be an integer between 2 and 6"
@@ -207,7 +214,7 @@ program nwlsm, eclass
 		di as error "sociality cannot be combined with sender or receiver effects in an undirected network"
 		error 198
 	}
-	local __opt "`=("`sender'" != "")' `=("`receiver'" != "")' `=("`sociality'" != "")' `=("`bilinear'" != "")' `sendervar' `senderdf' `receivervar' `receiverdf' `socialityvar' `socialitydf' `mklstarts' `chains' `threads' `clusters' `__fam' `dispvar' `dispdf'`=cond(`__io', " `neighbors' `__wt' `obvar' `__osa' `__osb'", "")'"
+	local __opt "`=("`sender'" != "")' `=("`receiver'" != "")' `=("`sociality'" != "")' `=("`bilinear'" != "")' `sendervar' `senderdf' `receivervar' `receiverdf' `socialityvar' `socialitydf' `mklstarts' `chains' `__thr' `clusters' `__fam' `dispvar' `dispdf'`=cond(`__io', " `neighbors' `__wt' `obvar' `__osa' `__osb'", "")'"
 	capture mata: mata drop __nwlsm_y
 	capture mata: mata drop __nwlsm_X
 	capture mata: mata drop __nwlsm_tr
@@ -332,6 +339,8 @@ program nwlsm, eclass
 			error 198
 		}
 	}
+	* degenerate network: no observed tie at all or every observed dyad a tie (binary); all observed values 0 (poisson, binomial); the diagonal is ignored
+	mata: st_local("__degen", strofreal(lsm_degenerate(__nwlsm_y, `__dir', `__fam')))
 	if `"`seed'"' == "" local __seed = floor(runiform() * 2147483646) + 1
 	else local __seed = `seed'
 	tempname B V T D Z ACC PP MB ZM ME VT ES ER EO RH QM CM LM CLS WM PRM
@@ -414,6 +423,7 @@ program nwlsm, eclass
 	ereturn local start = cond("`randomstart'" != "", "random", cond(`__fam' == 0, "classical scaling of the geodesic distances", "classical scaling of the tie values"))
 	ereturn scalar N_nodes = `nodes'
 	ereturn scalar dim = `dim'
+	ereturn scalar degenerate = `__degen'
 	ereturn scalar nsample = `__nsample_total'
 	ereturn scalar chains = `chains'
 	ereturn scalar nsample_chain = `__nsample_total' / `chains'
@@ -593,7 +603,27 @@ program _nwlsm_display
 		di as text "Gelman-Rubin statistic: largest value " as result %6.3f scalar(__nwlsm_rmax) as text " (see {bf:estat mcmcdiag})"
 		capture scalar drop __nwlsm_rmax
 	}
+	if e(degenerate) == 1 di as error "{p 0 0 2}Warning: the network has no ties (or every possible tie); the data carry no information on the intercept, and its estimate is determined by the prior.{p_end}"
 	if e(clusters) > 0 di as text "{p 0 0 2}Latent clusters: {bf:estat clusters} lists the posterior membership probabilities and the classification; cluster means {bf:e(cmeans)}, mixing proportions {bf:e(lambda)}.{p_end}"
 	if "`e(influence)'" == "yes" di as text "{p 0 0 2}Influence model: {bf:estat influence} gives the influence effect, predictions and the actors who exert most influence; weights {bf:e(W)}.{p_end}"
 	di as text "{p 0 0 2}Positions: minimum Kullback-Leibler estimate {bf:e(Z)} (also {bf:estat positions}); mean of the draws aligned to it {bf:e(Zmean)}; posterior mean distances {bf:e(D)}; posterior mean tie probabilities {bf:e(P)}. Positions are identified up to rotation, reflection and translation only.{p_end}"
+end
+
+capture mata: mata drop lsm_degenerate()
+mata:
+// 1 if the observed dyads (diagonal and, if undirected, the lower triangle left out) hold no tie or only ties (binary), or only zeros (poisson, binomial); else 0
+real scalar lsm_degenerate(real matrix y, real scalar dir, real scalar fam)
+{
+	real scalar n, i, j, nobs, nz
+	n = rows(y); nobs = 0; nz = 0
+	for (i = 1; i <= n; i++) for (j = 1; j <= n; j++) {
+		if (i == j | (!dir & j < i) | y[i, j] >= .) continue
+		nobs++
+		nz = nz + (y[i, j] != 0)
+	}
+	if (nobs == 0 | fam == 3) return(0)
+	if (nz == 0) return(1)
+	if (fam == 0 & nz == nobs) return(1)
+	return(0)
+}
 end
