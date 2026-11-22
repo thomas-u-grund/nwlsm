@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 1.0.5  21nov2026 author: Thomas Grund}{...}
+{* *! version 1.0.6  22nov2026 author: Thomas Grund}{...}
 {title:Title}
 
 {p2colset 9 17 24 2}{...}
@@ -209,7 +209,7 @@ parameters, and {cmd:e(rhat)} holds it; values close to 1 (below 1.1, say) indic
 {pstd}
 {opt threads()} sets how many threads the plugin uses. With the default, {cmd:threads(0)}, a single chain uses 4 threads, several chains use 2 threads per chain, and never more threads than the computer has processor cores (on a computer with one core, one thread); {cmd:threads(}{it:#}{cmd:)} with {it:#} > 0 is used as given. Chains are distributed over the threads first. Threads that are left over (more threads than chains) work
 inside a chain on the passes over all dyads (the updates of the coefficients) and on the minimum Kullback-Leibler fit, in networks of about 40 actors or more; the helper threads are created once and wait between the passes. A single chain cannot be
-made much faster than that, because its updates of the positions are sequential. More helper threads per chain do not make the passes over all dyads faster in networks of about 200 actors, which is why the default is small. The results for a given seed and {opt chains()} are exactly the same for every value of {opt threads()}, including the default.
+made much faster than that, because its updates of the positions are sequential. The default of 4 threads for a single chain was faster than one thread per processor core for networks of 200 or more actors on a Windows computer with many logical cores, and made no difference on macOS and Linux. The results for a given seed and {opt chains()} are exactly the same for every value of {opt threads()}, including the default.
 
 {title:Latent clusters}
 
@@ -332,4 +332,4 @@ A user manual (PDF in the {cmd:manual} folder of the package source) is archived
 {p 4 8 2}Krivitsky, P. N., Handcock, M. S., Raftery, A. E. and Hoff, P. D. 2009. Representing degree distributions, clustering, and homophily in social networks with latent cluster random effects models. Social Networks 31: 204-213.{p_end}
 
 {hline}
-{pstd}{it:nwlsm version 1.0.5, 21 November 2026}{p_end}{* nwversion}
+{pstd}{it:nwlsm version 1.0.6, 22 November 2026}{p_end}{* nwversion}

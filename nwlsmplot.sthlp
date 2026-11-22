@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 1.0.5  21nov2026 author: Thomas Grund}{...}
+{* *! version 1.0.6  22nov2026 author: Thomas Grund}{...}
 {title:Title}
 
 {p2colset 9 20 27 2}{...}
@@ -76,4 +76,4 @@ Not offered, compared with {cmd:plot.ergmm()}: pie charts of the membership prob
 {psee}{help nwlsm}, {help nwplot}{p_end}
 
 {hline}
-{pstd}{it:nwlsm version 1.0.5, 21 November 2026}{p_end}{* nwversion}
+{pstd}{it:nwlsm version 1.0.6, 22 November 2026}{p_end}{* nwversion}

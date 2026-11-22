@@ -1,4 +1,4 @@
-*! version 1.0.5  21nov2026 nwlsm
+*! version 1.0.6  22nov2026 nwlsm
 * Copyright (C) 2026 Thomas U. Grund
 * This file is part of nwlsm, a Stata package for latent space models for networks. It follows the latent space model of
 * Hoff, Raftery and Handcock (2002) as implemented in the R package latentnet (Krivitsky and Handcock) and is written independently.
@@ -87,7 +87,7 @@ program nwlsm, eclass
 		error 198
 	}
 	// Default number of threads (threads(0)): one chain gets 4 threads for its per-dyad passes, several chains 2 threads per chain, at most the processors of the machine.
-	// More helper threads per chain make the per-dyad passes slower, not faster (measured at 200 actors); the estimates do not depend on the number of threads.
+	// One thread per core inside a single chain was slower on Windows with many logical cores (200+ actors) and neutral on macOS and Linux; the estimates do not depend on the number of threads.
 	local __thr = `threads'
 	if `__thr' == 0 {
 		local __thr = min(c(processors_mach), cond(`chains' == 1, 4, 2 * `chains'))
@@ -396,7 +396,7 @@ program nwlsm, eclass
 	matrix colnames `VT' = mean sd mcse lower95 upper95
 	ereturn post `B' `V', obs(`__ny')
 	ereturn local cmd "nwlsm"
-	ereturn local version "1.0.5"
+	ereturn local version "1.0.6"
 	ereturn local estat_cmd "nwlsm_estat"
 	ereturn local title "`=cond(`__io', "Latent space model for social influence", "Latent space model")' (`=cond("`bilinear'" != "", "bilinear", "Euclidean distance")'; `__famname' family), posterior by MCMC"
 	ereturn local latent = cond("`bilinear'" != "", "bilinear", "euclidean")
