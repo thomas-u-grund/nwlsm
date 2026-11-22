@@ -22,6 +22,10 @@ The cost of a sweep is quadratic in the number of actors, because every position
 \showlog{lazega_time}
 \texttt{timer 1} is a single chain with one thread (the default of \opt{chains()}), \texttt{timer 2} four chains pooled with one thread and \texttt{timer 3} the same four chains on four threads. The results of fits with the same seed and number of chains do not depend on the number of threads (Section~\ref{sec:chains}). The matrices \texttt{e(D)}, \texttt{e(P)}, \texttt{e(Z)} and the like are stored when the number of actors fits into a Stata matrix; the posterior sample is kept in Mata, so that very large networks need memory for the draws of all positions (one row per draw, $n\times d$ values) as well.
 
+\section{Very small and degenerate networks}
+
+A network needs at least 3 actors; networks with 3 to 6 actors are fitted like any other, directed or undirected. On a network that small the data say little, and the prior on the positions has a large influence on the posterior, as described for sparse networks in Chapter~\ref{ch:model}. A network with no ties, or with every possible tie (binary networks; for \opt{family(poisson)} and \opt{family(binomial)} all observed values 0; the diagonal is ignored and missing dyads are left out), carries no information on the intercept. \nwlsm{} still estimates it, prints a warning that its estimate is determined by the prior, and sets \texttt{e(degenerate)} to 1 (otherwise 0).
+
 \section{The compiled plugin and the Mata library}
 
 The sampler, the likelihoods, the minimum Kullback--Leibler fit and the simulation for the goodness of fit are in a C plugin that ships with the package; the tables and the post-estimation commands are Stata and Mata code. See Section~\ref{sec:install} for the plugin and the Mata library on your own computer.

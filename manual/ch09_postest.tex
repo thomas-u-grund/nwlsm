@@ -31,7 +31,8 @@ The positions are a picture, not a measurement: turning or flipping them changes
 \multicolumn{2}{@{}l}{\textbf{Scalars}} \\
 \texttt{e(N)}, \texttt{e(N\_nodes)} & Number of dyads (pairs for an undirected network) and of actors. \\
 \texttt{e(dim)}, \texttt{e(nsample)}, \texttt{e(burnin)}, \texttt{e(interval)}, \texttt{e(seed)}, \texttt{e(mklstarts)} & Settings of the run (\texttt{e(nsample)}: draws in all chains). \\
-\texttt{e(chains)}, \texttt{e(nsample\_chain)}, \texttt{e(threads)}, \texttt{e(clusters)} & Number of chains, draws per chain, threads requested (0: one per core), number of latent clusters. \\
+\texttt{e(chains)}, \texttt{e(nsample\_chain)}, \texttt{e(threads)}, \texttt{e(clusters)} & Number of chains, draws per chain, threads requested (0: the default described in Section~\ref{sec:chains}), number of latent clusters. \\
+\texttt{e(degenerate)} & 1 if the network has no ties or every possible tie (for \opt{family(poisson)} and \opt{family(binomial)}: all observed values 0), else 0. \\
 \texttt{e(ll\_mean)}, \texttt{e(ll\_sd)} & Posterior mean and standard deviation of the log likelihood. \\
 \texttt{e(sigma2\_mean)}, \texttt{e(sigma2\_sd)}, \texttt{e(prior\_scale)}, \texttt{e(prior\_df)} & Posterior mean and standard deviation of the variance of the positions, and the scale and degrees of freedom of its prior. \\
 \texttt{e(mkl\_start)}, \texttt{e(mkl\_iter)}, \texttt{e(mkl\_obj)} & The draw that started the MKL fit, its iterations, the maximised log likelihood of the posterior mean tie probabilities. \\
